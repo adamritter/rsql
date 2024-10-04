@@ -831,7 +831,7 @@ class Where(View):
         self.set_filter(main=main, **where)
     
     def is_where_true(self, values):
-        cursor = self.db.cursor
+        cursor = self.db.get_cursor()
         placeholders = ', '.join([f"? as '{col}'" for col in values.keys()])
         execute(cursor, f"SELECT * FROM (SELECT {placeholders}) {self.where_query}", tuple(values.values()))
         return cursor.fetchone()
@@ -1455,15 +1455,18 @@ class Database:
         self.conn.execute("PRAGMA temp_store=MEMORY;")
         self.conn.execute("PRAGMA journal_size_limit=6144000;")
         self.conn.execute("PRAGMA mmap_size=134217728;") # 128MB
-        self.cursor = self.conn.cursor()
+        self._cursor = self.conn.cursor()
 
         self.tables = {}
         self.insert_cbs = []
         self.update_cbs = []
         self.delete_cbs = []
 
+    def get_cursor(self):
+        return self._cursor
+
     def tables(self):
-        cursor = self.conn.cursor()
+        cursor = self.get_cursor()
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
         return [row[0] for row in cursor.fetchall()]
 
@@ -1473,13 +1476,14 @@ class Database:
             self.tables[table_name] = table
             if self.use_triggers:
                 col_defs = [(col, "INTEGER" if "PRIMARY KEY" in dtype else dtype) for col, dtype in table.column_definitions]
-                self.conn.execute(
+                cursor = self.get_cursor()
+                cursor.execute(
                     f"CREATE TEMP TABLE {table_name}_rows (action INTEGER, {', '.join([f'old_{col} {dtype}, new_{col} {dtype}' for col, dtype in col_defs])})")
-                self.conn.execute(
+                cursor.execute(
                     f"CREATE TEMP TRIGGER {table_name}_insert AFTER INSERT ON {table_name} BEGIN INSERT INTO {table_name}_rows (action, {', '.join([f'new_{col}' for col in table.columns])}) VALUES (1, {', '.join([f'NEW.{col}' for col in table.columns])}); END;")
-                self.conn.execute(
+                cursor.execute(
                     f"CREATE TEMP TRIGGER {table_name}_update AFTER UPDATE ON {table_name} BEGIN INSERT INTO {table_name}_rows (action, {', '.join([f'old_{col}, new_{col}' for col in table.columns])}) VALUES (2, {', '.join([f'OLD.{col}, NEW.{col}' for col in table.columns])}); END;")
-                self.conn.execute(
+                cursor.execute(
                     f"CREATE TEMP TRIGGER {table_name}_delete AFTER DELETE ON {table_name} BEGIN INSERT INTO {table_name}_rows (action, {', '.join([f'old_{col}' for col in table.columns])}) VALUES (3, {', '.join([f'OLD.{col}' for col in table.columns])}); END;")
         return self.tables[table_name]
 
@@ -1503,8 +1507,7 @@ class Database:
             self.conn.execute(f"DELETE FROM {table_name}_rows;")
     
     def insert(self, table_name: str, ignore=False, **values):
-        # cursor = self.conn.cursor()
-        cursor = self.cursor
+        cursor = self.get_cursor()
         try:
             execute(cursor, f"INSERT {'OR IGNORE' if ignore else ''} INTO {table_name} ({', '.join(values.keys())}) VALUES ({', '.join(['?' for _ in values])})", tuple(values.values()))
             if ignore and cursor.rowcount == 0:
@@ -1523,8 +1526,7 @@ class Database:
             raise e
 
     def delete(self, table_name: str, **values):
-        # cursor = self.conn.cursor()
-        cursor = self.cursor
+        cursor = self.get_cursor()
         # get deleted rows
         where_clause, remaining_values = create_where_null_clause(values.keys(), values.values())
         execute(cursor, f"SELECT * FROM {table_name} {where_clause}", remaining_values)
@@ -1543,7 +1545,7 @@ class Database:
 
     def update(self, table_name: str, where: dict, **values):
         # need old and new data
-        cursor = self.conn.cursor()
+        cursor = self.get_cursor()
         try:
             where_clause, remaining_values = create_where_null_clause(where.keys(), where.values())
             execute(cursor, f"SELECT * FROM {table_name} {where_clause};", remaining_values)
@@ -1571,7 +1573,7 @@ class Database:
             raise e
     
     def execute(self, query):
-        cursor = self.conn.cursor()
+        cursor = self.get_cursor()
         try:
             cursor.execute(query)
             return cursor.fetchall()
