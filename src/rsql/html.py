@@ -3,35 +3,29 @@ from .helpers import *
 from fasttag import *
 import fasttag
 from rsql import URLM
-queue = []
-queues = {}
-tab_id = 0
+import threading
+from queue import Queue
+
+# Replace global variables with thread-local storage
+local = threading.local()
+local.tab_id = 0
 last_tab_id = 0
+
+# Replace the global queues dict with a thread-safe defaultdict
+from collections import defaultdict
+queues = defaultdict(Queue)
+
 def append_queue(e):
-    global queues
-    global tab_id
-    q = queues.get(tab_id, [])
-    if not q:
-        q = []
-    q.append(e)
-    queues[tab_id] = q
+    queues[local.tab_id].put(e)
 
 def get_and_clear_queue():
-    global queues
-    global tab_id
-    q = queues[tab_id]
-    del queues[tab_id]
+    q = list(queues[local.tab_id].queue)
+    queues[local.tab_id] = Queue()
     return q
 
 def append_queue_to(tid, e):
     print("append_queue_to", tid, e)
-    global queues
-    q = queues.get(tid, [])
-    if not q:
-        q = []
-    q.append(e)
-    queues[tid] = q
-
+    queues[tid].put(e)
 
 def rt_with_sqlx(rt, app):
     def rtx(route):
@@ -50,35 +44,34 @@ from inspect import signature
 def with_sqlx(f, app=None):
     @wraps(f)
     def wrapper(*args):
-        global tab_id
-        global queues
         global last_tab_id
         start_time = time.time()
         sqlx_tab_id = args[-1]
         hx_request = args[-2]
         args = args[:-2]
+        
         if hx_request:
-            tab_id = sqlx_tab_id
+            local.tab_id = sqlx_tab_id
         else:
-            tab_id = last_tab_id
-        print("args", args, "hx_request", hx_request, "sqlx_tab_id", sqlx_tab_id, "tab_id", tab_id, "app", app)
+            local.tab_id = last_tab_id
+        
+        print("args", args, "hx_request", hx_request, "sqlx_tab_id", sqlx_tab_id, "tab_id", local.tab_id, "app", app)
         global global_app
         global_app = app
         result = f(*args)
 
-        q = queues.get(tab_id, [])
-        if q:
-            del queues[tab_id]
-        else:
-            q = []
+        q = list(queues[local.tab_id].queue)
+        queues[local.tab_id] = Queue()
+        
         end_time = time.time()
         render_time = (end_time - start_time) * 1000  # Convert to milliseconds
-        print("reading queue", tab_id, f"Rendering time: {render_time:.2f} ms", "hx_request", hx_request, "read queue", q)
+        print("reading queue", local.tab_id, f"Rendering time: {render_time:.2f} ms", "hx_request", hx_request, "read queue", q)
+        
         if not hx_request:
-            # Add a custom header to the response
             q.append(Script(f"document.body.addEventListener('htmx:configRequest', function(evt) {{ evt.detail.headers['SQLX-Tab-Id'] = '{last_tab_id}';}});"))
             q.append(Meta(name="htmx-config", content='{"defaultSwapStyle":"none"}'))
             last_tab_id += 1
+        
         if result:
             return (*q, result)
         else:
@@ -107,8 +100,7 @@ def table(t, cb, header=None, id=None):
     r = fasttag.Table(
         Thead(header) if header else None,
          Tbody(*[Tr(cb(row), id=f"e{abs(row.__hash__())}") for row in t], id=id))
-    global tab_id
-    tid = tab_id
+    tid = local.tab_id
     print("table2", tid)
     t.on_insert(lambda row: append_queue_to(tid, Template(Tbody(Tr(cb(row), id=f"e{abs(row.__hash__())}"), hx_swap_oob=f"beforeend:#{id}"))))
     t.on_delete(lambda row: append_queue_to(tid, Template(Tr(id=f"e{abs(row.__hash__())}", hx_swap_oob="delete"))))
@@ -134,13 +126,13 @@ def ulli(t, cb, header=None, id=None):
 
 def value(v):
     id = nextid()
-    tid = tab_id
+    tid = local.tab_id
     v.onchange(lambda new: append_queue_to(tid, Span(new, id=id, hx_swap_oob=f"true")))
     return Span(v.value, id=id)
 
 def show_if(cond, *args):
     id = nextid()
-    tid = tab_id
+    tid = local.tab_id
     cond.update_cbs.append(lambda old, new: append_queue_to(tid, Span(args, id=id, hx_swap_oob="true", style=None if new else "display: none;")))
     return Span(args, id=id, style=None if cond.value else "display: none;")
 
