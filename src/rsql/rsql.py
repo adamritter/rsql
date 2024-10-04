@@ -19,7 +19,7 @@
 # - query editor
 # - schema editor
 # - Python vs Ruby comparision (ruby 2x slower, probably a bit nicer API, but not that much difference. insert/delete much slower for some reason, also need prepare statement)
-import os
+import os, threading
 from urllib.parse import urlencode
 
 DEBUG = os.environ.get('DEBUG', 'False').lower() in ['true', '1', 'yes', 'on']
@@ -1455,7 +1455,7 @@ class Database:
         self.conn.execute("PRAGMA temp_store=MEMORY;")
         self.conn.execute("PRAGMA journal_size_limit=6144000;")
         self.conn.execute("PRAGMA mmap_size=134217728;") # 128MB
-        self._cursor = self.conn.cursor()
+        self.local = threading.local()
 
         self.tables = {}
         self.insert_cbs = []
@@ -1463,7 +1463,10 @@ class Database:
         self.delete_cbs = []
 
     def get_cursor(self):
-        return self._cursor
+        # return self._cursor
+        if not hasattr(self.local, 'cursor'):
+            self.local.cursor = self.conn.cursor()
+        return self.local.cursor
 
     def tables(self):
         cursor = self.get_cursor()
