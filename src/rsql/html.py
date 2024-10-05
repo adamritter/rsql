@@ -96,15 +96,12 @@ def nextid():
 def table(t, cb, header=None, id=None):
     if not id:
         id = nextid()
-    print("table", t)
     r = fasttag.Table(
         Thead(header) if header else None,
          Tbody(*[Tr(cb(row), id=f"e{abs(row.__hash__())}") for row in t], id=id))
     tid = local.tab_id
-    print("table2", tid)
     t.on_insert(lambda row: append_queue_to(tid, Template(Tbody(Tr(cb(row), id=f"e{abs(row.__hash__())}"), hx_swap_oob=f"beforeend:#{id}"))))
     t.on_delete(lambda row: append_queue_to(tid, Template(Tr(id=f"e{abs(row.__hash__())}", hx_swap_oob="delete"))))
-    # TODO: fix bug in HTML: changing id inside template doesn't work
     t.on_update(lambda old, new: append_queue_to(tid, Template(Tr(cb(new),id=f"e{abs(new.__hash__())}", hx_swap_oob=f"outerHTML: #e{abs(old.__hash__())}"))))
     return r
 

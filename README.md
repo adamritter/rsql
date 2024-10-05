@@ -7,7 +7,6 @@
  production readiness, documentation, and examples.
 
  ## Production Readiness features missing
- - Multithreading support (right now the server has a huge bug when 2 requests are sent at the same time)
  - Memory leaks (get rid of all memory when HTTP/2.0 closes / timeout)
  - Async support (use context vars instead of globals)
  - Authentication (look at SimpleHTML)
