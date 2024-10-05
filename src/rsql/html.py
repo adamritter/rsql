@@ -55,7 +55,7 @@ def with_sqlx(f, app=None):
         else:
             local.tab_id = last_tab_id
         
-        print("args", args, "hx_request", hx_request, "sqlx_tab_id", sqlx_tab_id, "tab_id", local.tab_id, "app", app)
+        # print("args", args, "hx_request", hx_request, "sqlx_tab_id", sqlx_tab_id, "tab_id", local.tab_id, "app", app)
         global global_app
         global_app = app
         result = f(*args)
@@ -65,7 +65,7 @@ def with_sqlx(f, app=None):
         
         end_time = time.time()
         render_time = (end_time - start_time) * 1000  # Convert to milliseconds
-        print("reading queue", local.tab_id, f"Rendering time: {render_time:.2f} ms", "hx_request", hx_request, "read queue", q)
+        # print("reading queue", local.tab_id, f"Rendering time: {render_time:.2f} ms", "hx_request", hx_request, "read queue", q)
         
         if not hx_request:
             q.append(Script(f"document.body.addEventListener('htmx:configRequest', function(evt) {{ evt.detail.headers['SQLX-Tab-Id'] = '{last_tab_id}';}});"))
@@ -116,7 +116,7 @@ def ulli(t, cb, header=None, id=None):
         *[Li(cb(row), id=f"e{abs(row.__hash__())}") for row in t],
         id=id
     )
-    tid = tab_id
+    tid = local.tab_id
     t.on_insert(lambda row: append_queue_to(tid, Li(cb(row), id=f"e{abs(row.__hash__())}", hx_swap_oob=f"beforeend: #{id}")))
     t.on_delete(lambda row: append_queue_to(tid, Li(id=f"e{abs(row.__hash__())}", hx_swap_oob="delete")))
     t.on_update(lambda old, new: append_queue_to(tid, Li(cb(new), id=f"e{abs(new.__hash__())}", hx_swap_oob=f"outerHTML: #e{abs(old.__hash__())}")) or 
