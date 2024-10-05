@@ -503,9 +503,7 @@ class Join(View):
         self.query = f"SELECT {', '.join(self.columns_with_selectors)} FROM ({self.parent.query}) {as_left_name} {join_type} ({self.parent2.query}) {as_right_name} ON {', '.join([f'{self.left_prefix}{k}={self.right_prefix}{v}' for k, v in self.on.items()])}"
     
     def call_insert_cbs(self, values):
-        cursor = self.db.get_cursor()
-        execute(cursor, f"SELECT * FROM ({self.parent2.query}) WHERE {', '.join([f'{self.on[k]}=?' for k in self.on.keys()])};", tuple(values[k] for k in self.on.keys()))
-        parent2_matches = cursor.fetchall()
+        parent2_matches = self.db.fetchall(f"SELECT * FROM ({self.parent2.query}) WHERE {', '.join([f'{self.on[k]}=?' for k in self.on.keys()])};", tuple(values[k] for k in self.on.keys()))
         values_array = [values[col] for col in self.parent.columns]
         for match in parent2_matches:
             if self.left_outer or self.right_outer:
@@ -522,10 +520,8 @@ class Join(View):
                 cb(joined_values)
 
     def call_delete_cbs(self, values):
-        cursor = self.db.get_cursor()
         # Query to find the matching rows in parent2
-        execute(cursor, f"SELECT * FROM ({self.parent2.query}) WHERE {', '.join([f'{self.on[k]}=?' for k in self.on.keys()])};", tuple(values[k] for k in self.on.keys()))
-        parent2_matches = cursor.fetchall()
+        parent2_matches = self.db.execute(f"SELECT * FROM ({self.parent2.query}) WHERE {', '.join([f'{self.on[k]}=?' for k in self.on.keys()])};", tuple(values[k] for k in self.on.keys()))
         values_array = [values[col] for col in self.parent.columns]
         for match in parent2_matches:
             if self.left_outer or self.right_outer:
@@ -538,8 +534,7 @@ class Join(View):
             if self.right_outer:
                 # If right outer and there's no match for the joined part anymore in the left table,
                 # Nones are inserted [ update should be probably emitted instead ]
-                execute(cursor, f"SELECT * FROM ({self.parent.query}) WHERE {', '.join([f'{k}=?' for k in self.on.keys()])};", tuple(values[k] for k in self.on.keys()))
-                parent1_matches = cursor.fetchone()
+                parent1_matches = self.db.fetchone(f"SELECT * FROM ({self.parent.query}) WHERE {', '.join([f'{k}=?' for k in self.on.keys()])};", tuple(values[k] for k in self.on.keys()))
                 if not parent1_matches:
                     joined_values_array = [None for _ in self.parent.columns] + list(match)
                     joined_values = {col: joined_values_array[i] for i, col in enumerate(self.columns)}
@@ -552,10 +547,8 @@ class Join(View):
                 cb(joined_values)
 
     def call_update_cbs(self, old, new):
-        cursor = self.db.get_cursor()
         # First, handle the deletion of the old joined row
-        execute(cursor, f"SELECT * FROM ({self.parent2.query}) WHERE {', '.join([f'{self.on[k]}=?' for k in self.on.keys()])};", tuple(old[k] for k in self.on.keys()))
-        parent2_matches = cursor.fetchall()
+        parent2_matches = self.db.fetchall(f"SELECT * FROM ({self.parent2.query}) WHERE {', '.join([f'{self.on[k]}=?' for k in self.on.keys()])};", tuple(old[k] for k in self.on.keys()))
         to_delete = []
         old_array = [old[col] for col in self.parent.columns]
         new_array = [new[col] for col in self.parent.columns]
@@ -568,8 +561,7 @@ class Join(View):
             to_delete.append(old_joined_array)
 
         # Now, handle the insertion of the new joined row
-        execute(cursor, f"SELECT * FROM ({self.parent2.query}) WHERE {', '.join([f'{self.on[k]}=?' for k in self.on.keys()])};", tuple(new[k] for k in self.on.keys()))
-        parent2_matches = cursor.fetchall()
+        parent2_matches = self.db.fetchall(f"SELECT * FROM ({self.parent2.query}) WHERE {', '.join([f'{self.on[k]}=?' for k in self.on.keys()])};", tuple(new[k] for k in self.on.keys()))
         to_insert = []
         for match in parent2_matches:
             if self.left_outer or self.right_outer:
@@ -594,15 +586,12 @@ class Join(View):
                     cb(values_dict)
 
     def call_insert_cbs2(self, values):
-        cursor = self.db.get_cursor()
         # Query to find the matching rows in parent1
-        execute(cursor, f"SELECT * FROM ({self.parent.query}) WHERE {', '.join([f'{k}=?' for k in self.on.keys()])};", tuple(values[self.on[k]] for k in self.on.keys()))
-        parent1_matches = cursor.fetchall()
+        parent1_matches = self.db.fetchall(f"SELECT * FROM ({self.parent.query}) WHERE {', '.join([f'{k}=?' for k in self.on.keys()])};", tuple(values[self.on[k]] for k in self.on.keys()))
         values_array = [values[col] for col in self.parent2.columns]
         right_matches_after_insert = None
         if self.left_outer:
-            execute(cursor, f"SELECT * FROM ({self.parent2.query}) WHERE {', '.join([f'{k}=?' for k in self.on.values()])} LIMIT 2", tuple(values[self.on[k]] for k in self.on.keys()))
-            right_matches_after_insert = len(cursor.fetchall())
+            right_matches_after_insert = len(self.db.fetchall(f"SELECT * FROM ({self.parent2.query}) WHERE {', '.join([f'{k}=?' for k in self.on.values()])} LIMIT 2", tuple(values[self.on[k]] for k in self.on.keys())))
         for match in parent1_matches:
             if self.left_outer or self.right_outer:
                 joined_values_array = [match[idx] for idx, col in enumerate(self.parent.columns)] + values_array
@@ -625,10 +614,8 @@ class Join(View):
                 cb(joined_values)
 
     def call_delete_cbs2(self, values):
-        cursor = self.db.get_cursor()
         # Query to find the matching rows in parent1
-        execute(cursor, f"SELECT * FROM ({self.parent.query}) WHERE {', '.join([f'{k}=?' for k in self.on.keys()])};", tuple(values[self.on[k]] for k in self.on.keys()))
-        parent1_matches = cursor.fetchall()
+        parent1_matches = self.db.fetchall(f"SELECT * FROM ({self.parent.query}) WHERE {', '.join([f'{k}=?' for k in self.on.keys()])};", tuple(values[self.on[k]] for k in self.on.keys()))
         values_array = [values[col] for col in self.parent2.columns]
         for match in parent1_matches:
             if self.left_outer or self.right_outer:
@@ -639,8 +626,7 @@ class Join(View):
             for cb in self.delete_cbs:
                 cb(joined_values)
             if self.left_outer:
-                execute(cursor, f"SELECT * FROM ({self.parent2.query}) WHERE {', '.join([f'{k}=?' for k in self.on.keys()])};", tuple(values[k] for k in self.on.keys()))
-                parent2_matches = cursor.fetchone()
+                parent2_matches = self.db.fetchone(f"SELECT * FROM ({self.parent2.query}) WHERE {', '.join([f'{k}=?' for k in self.on.keys()])};", tuple(values[k] for k in self.on.keys()))
                 if not parent2_matches:
                     joined_values_array = list(match) + [None for _ in self.parent2.columns]
                     joined_values = {col: joined_values_array[i] for i, col in enumerate(self.columns)}
@@ -654,10 +640,8 @@ class Join(View):
                 cb(joined_values)
   
     def call_update_cbs2(self, old, new):
-        cursor = self.db.get_cursor()
         # First, handle the deletion of the old joined row
-        execute(cursor, f"SELECT * FROM ({self.parent.query}) WHERE {', '.join([f'{k}=?' for k in self.on.keys()])};", tuple(old[self.on[k]] for k in self.on.keys()))
-        parent1_matches = cursor.fetchall()
+        parent1_matches = self.db.fetchall(f"SELECT * FROM ({self.parent.query}) WHERE {', '.join([f'{k}=?' for k in self.on.keys()])};", tuple(old[self.on[k]] for k in self.on.keys()))
         to_delete = []
         to_insert = []
         old_array = [old[col] for col in self.parent2.columns]
@@ -670,8 +654,7 @@ class Join(View):
             to_delete.append(old_joined_array)
 
         # Now, handle the insertion of the new joined row
-        execute(cursor, f"SELECT * FROM ({self.parent.query}) WHERE {', '.join([f'{k}=?' for k in self.on.keys()])};", tuple(new[self.on[k]] for k in self.on.keys()))
-        parent1_matches = cursor.fetchall()
+        parent1_matches = self.db.fetchall(f"SELECT * FROM ({self.parent.query}) WHERE {', '.join([f'{k}=?' for k in self.on.keys()])};", tuple(new[self.on[k]] for k in self.on.keys()))
         for match in parent1_matches:
             if self.left_outer or self.right_outer:
                 new_joined_array = [match[idx] for idx, col in enumerate(self.parent.columns)] + new_array
@@ -714,9 +697,7 @@ class Distinct(View):
         self.columns = parent.columns
         self.query = f"SELECT DISTINCT * FROM ({self.parent.query})"
         self.value_hashes_counts = {}
-        cursor = self.db.get_cursor()
-        execute(cursor, self.query)
-        for row in cursor.fetchall():
+        for row in self.db.fetchall(self.query):
             self.value_hashes_counts[tuple(row).__hash__()] = self.value_hashes_counts.get(tuple(row).__hash__(), 0) + 1
 
     def call_insert_cbs(self, values):
@@ -782,20 +763,15 @@ class Select(View):
         self.query = f"SELECT {', '.join(column_parts)} FROM ({self.parent.query})"
     
     def call_insert_cbs(self, values):
-        cursor = self.db.get_cursor()
-        execute(cursor, self.select_query + f" FROM (SELECT " + ", ".join([f"{value_to_sql(value)} AS {col}" for col, value in values.items()]) + ")")
-        transformed_values_values= cursor.fetchone()
+        transformed_values_values = self.db.fetchone(self.select_query + f" FROM (SELECT " + ", ".join([f"{value_to_sql(value)} AS {col}" for col, value in values.items()]) + ")")
         transformed_values = {k: v for k, v in zip(self.columns, transformed_values_values)}
         for cb in self.insert_cbs:
             cb(transformed_values)
 
     def call_update_cbs(self, old, new):
-        cursor = self.db.get_cursor()
-        execute(cursor, self.select_query + f" FROM (SELECT " + ", ".join([f"{value_to_sql(value)} AS {col}" for col, value in old.items()]) + ")")
-        transformed_old_values_values = cursor.fetchone()
+        transformed_old_values_values = self.db.fetchone(self.select_query + f" FROM (SELECT " + ", ".join([f"{value_to_sql(value)} AS {col}" for col, value in old.items()]) + ")")
         transformed_old_values = {k: v for k, v in zip(self.columns, transformed_old_values_values)}
-        execute(cursor, self.select_query + f" FROM (SELECT " + ", ".join([f"{value_to_sql(value)} AS {col}" for col, value in new.items()]) + ")")
-        transformed_new_values_values = cursor.fetchone()
+        transformed_new_values_values = self.db.fetchone(self.select_query + f" FROM (SELECT " + ", ".join([f"{value_to_sql(value)} AS {col}" for col, value in new.items()]) + ")")
         transformed_new_values = {k: v for k, v in zip(self.columns, transformed_new_values_values)}
         for cb in self.update_cbs:
             cb(transformed_old_values, transformed_new_values)
@@ -1283,12 +1259,10 @@ class GroupBy(View):
                         new_group.append(new_value)
                     elif new_value < old_value and old_value == old[func.split('(')[1][:-1]]:
                         # Need to query for the new max
-                        cursor = self.db.get_cursor()
                         column = func.split('(')[1][:-1]
                         where_clause, remaining_values = create_where_null_clause(self.group_by_columns, group_by_values)
                         query = f"SELECT MAX({column}) FROM ({self.parent.query}){where_clause}"
-                        execute(cursor, query, remaining_values)
-                        new_max = cursor.fetchone()[0]
+                        new_max = self.db.fetchone(query, remaining_values)[0]
                         new_group.append(new_max)
                     else:
                         new_group.append(old_value)
@@ -1298,12 +1272,10 @@ class GroupBy(View):
                         new_group.append(new_value)
                     elif new_value > old_value and old_value == old[func.split('(')[1][:-1]]:
                         # Need to query for the new min
-                        cursor = self.db.get_cursor()
                         column = func.split('(')[1][:-1]
                         where_clause, remaining_values = create_where_null_clause(self.group_by_columns, group_by_values)
                         query = f"SELECT MIN({column}) FROM ({self.parent.query}){where_clause}"
-                        execute(cursor, query, remaining_values)
-                        new_min = cursor.fetchone()[0]
+                        new_min = self.db.fetchone(query, remaining_values)[0]
                         new_group.append(new_min)
                     else:
                         new_group.append(old_value)
@@ -1407,11 +1379,9 @@ class GroupBy(View):
                 # For MAX and MIN, we need to recalculate only if the deleted value matches the current aggregate
                 if (istartswith(func, 'MAX') and values[func.split('(')[1][:-1]] == old_value) or \
                    (istartswith(func, 'MIN') and values[func.split('(')[1][:-1]] == old_value):
-                    cursor = self.db.get_cursor()
                     where_clause, remaining_values = create_where_null_clause(self.group_by_columns, group_by_values)
                     query = f"SELECT {func} FROM ({self.parent.query}){where_clause}"
-                    execute(cursor, query, remaining_values)
-                    new_value = cursor.fetchone()[0]
+                    new_value = self.db.fetchone(query, remaining_values)[0]
                     new_group.append(new_value)
                 else:
                     new_group.append(old_value)
@@ -1435,7 +1405,7 @@ class Database:
         self.conn.execute("PRAGMA journal_size_limit=6144000;")
         self.conn.execute("PRAGMA mmap_size=134217728;") # 128MB
         self.local = threading.local()
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
 
         self.tables = {}
         self.insert_cbs = []
@@ -1450,9 +1420,7 @@ class Database:
         return self.local.cursor
 
     def tables(self):
-        cursor = self.get_cursor()
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        return [row[0] for row in cursor.fetchall()]
+        return [row[0] for row in self.execute("SELECT name FROM sqlite_master WHERE type='table'")]
 
     def table(self, table_name: str, id=AUTOINCREMENT, temp=False, **columns: Union[str, Type]) -> Table:
         if table_name not in self.tables:
@@ -1460,14 +1428,13 @@ class Database:
             self.tables[table_name] = table
             if self.use_triggers:
                 col_defs = [(col, "INTEGER" if "PRIMARY KEY" in dtype else dtype) for col, dtype in table.column_definitions]
-                cursor = self.get_cursor()
-                cursor.execute(
+                self.execute(
                     f"CREATE TEMP TABLE {table_name}_rows (action INTEGER, {', '.join([f'old_{col} {dtype}, new_{col} {dtype}' for col, dtype in col_defs])})")
-                cursor.execute(
+                self.execute(
                     f"CREATE TEMP TRIGGER {table_name}_insert AFTER INSERT ON {table_name} BEGIN INSERT INTO {table_name}_rows (action, {', '.join([f'new_{col}' for col in table.columns])}) VALUES (1, {', '.join([f'NEW.{col}' for col in table.columns])}); END;")
-                cursor.execute(
+                self.execute(
                     f"CREATE TEMP TRIGGER {table_name}_update AFTER UPDATE ON {table_name} BEGIN INSERT INTO {table_name}_rows (action, {', '.join([f'old_{col}, new_{col}' for col in table.columns])}) VALUES (2, {', '.join([f'OLD.{col}, NEW.{col}' for col in table.columns])}); END;")
-                cursor.execute(
+                self.execute(
                     f"CREATE TEMP TRIGGER {table_name}_delete AFTER DELETE ON {table_name} BEGIN INSERT INTO {table_name}_rows (action, {', '.join([f'old_{col}' for col in table.columns])}) VALUES (3, {', '.join([f'OLD.{col}' for col in table.columns])}); END;")
         return self.tables[table_name]
 
@@ -1491,78 +1458,84 @@ class Database:
             self.conn.execute(f"DELETE FROM {table_name}_rows;")
     
     def insert(self, table_name: str, ignore=False, **values):
-        cursor = self.get_cursor()
-        try:
-            execute(cursor, f"INSERT {'OR IGNORE' if ignore else ''} INTO {table_name} ({', '.join(values.keys())}) VALUES ({', '.join(['?' for _ in values])})", tuple(values.values()))
-            if ignore and cursor.rowcount == 0:
-                return
-            if self.use_triggers:
-                self.respond_to_changes(table_name)
-            else:
-                cursor.execute(f"SELECT * FROM {table_name} WHERE rowid = ?", (cursor.lastrowid,))
-                inserted_row = cursor.fetchone()
-                data = {k[0]: v for k, v in zip(cursor.description, inserted_row)}
-                for cb in self.insert_cbs:
-                    cb(table_name, data)
-            self.conn.commit()
-        except Exception as e:
-            self.conn.rollback()
-            raise e
-
-    def delete(self, table_name: str, **values):
-        cursor = self.get_cursor()
-        # get deleted rows
-        where_clause, remaining_values = create_where_null_clause(values.keys(), values.values())
-        execute(cursor, f"SELECT * FROM {table_name} {where_clause}", remaining_values)
-        deleted_rows = cursor.fetchall()
-        description = [x[0] for x in cursor.description]
-        for row in deleted_rows:
-            where_clause, remaining_values = create_where_null_clause(description, row)
-            execute(cursor, f"DELETE FROM {table_name} {where_clause}", remaining_values)
-            if self.use_triggers:
-                self.respond_to_changes(table_name)
-            else:
-                for row in deleted_rows:
-                    for cb in self.delete_cbs:
-                        cb(table_name, row)
-        self.conn.commit()
-
-    def update(self, table_name: str, where: dict, **values):
-        # need old and new data
-        cursor = self.get_cursor()
-        try:
-            where_clause, remaining_values = create_where_null_clause(where.keys(), where.values())
-            execute(cursor, f"SELECT * FROM {table_name} {where_clause};", remaining_values)
-            old_rows = cursor.fetchall()
-            description = [x[0] for x in cursor.description]
-            set_clause = f"SET {', '.join([f'{k}=?' for k in values])}"
-            execute(cursor, f"UPDATE {table_name} {set_clause} {where_clause};", tuple(values.values()) + remaining_values)
-            if len(old_rows) != cursor.rowcount:
-                raise Exception("Update failed: where clause does not match any rows.")
-            desc_from_upper = {k.upper(): k for k in description}
-            updated_values = {desc_from_upper[k.upper()]: v for k, v in values.items()}
-            for row in old_rows:
-                old = {k: v for k, v in zip(description, row)}
-                new = {**old, **updated_values}
-                if old == new:
-                    continue
+        with self.lock:
+            cursor = self.get_cursor()
+            try:
+                execute(cursor, f"INSERT {'OR IGNORE' if ignore else ''} INTO {table_name} ({', '.join(values.keys())}) VALUES ({', '.join(['?' for _ in values])})", tuple(values.values()))
+                if ignore and cursor.rowcount == 0:
+                    return
                 if self.use_triggers:
                     self.respond_to_changes(table_name)
                 else:
-                    for cb in self.update_cbs:
-                        cb(table_name, old, new)
+                    cursor.execute(f"SELECT * FROM {table_name} WHERE rowid = ?", (cursor.lastrowid,))
+                    inserted_row = cursor.fetchone()
+                    data = {k[0]: v for k, v in zip(cursor.description, inserted_row)}
+                    for cb in self.insert_cbs:
+                        cb(table_name, data)
+                self.conn.commit()
+            except Exception as e:
+                self.conn.rollback()
+                raise e
+
+    def delete(self, table_name: str, **values):
+        with self.lock:
+            cursor = self.get_cursor()
+            # get deleted rows
+            where_clause, remaining_values = create_where_null_clause(values.keys(), values.values())
+            execute(cursor, f"SELECT * FROM {table_name} {where_clause}", remaining_values)
+            deleted_rows = cursor.fetchall()
+            description = [x[0] for x in cursor.description]
+            for row in deleted_rows:
+                where_clause, remaining_values = create_where_null_clause(description, row)
+                execute(cursor, f"DELETE FROM {table_name} {where_clause}", remaining_values)
+                if self.use_triggers:
+                    self.respond_to_changes(table_name)
+                else:
+                    for row in deleted_rows:
+                        for cb in self.delete_cbs:
+                            cb(table_name, row)
             self.conn.commit()
-        except Exception as e:
-            self.conn.rollback()
-            raise e
+
+    def update(self, table_name: str, where: dict, **values):
+        with self.lock:
+        # need old and new data
+            cursor = self.get_cursor()
+            try:
+                where_clause, remaining_values = create_where_null_clause(where.keys(), where.values())
+                execute(cursor, f"SELECT * FROM {table_name} {where_clause};", remaining_values)
+                old_rows = cursor.fetchall()
+                description = [x[0] for x in cursor.description]
+                set_clause = f"SET {', '.join([f'{k}=?' for k in values])}"
+                execute(cursor, f"UPDATE {table_name} {set_clause} {where_clause};", tuple(values.values()) + remaining_values)
+                if len(old_rows) != cursor.rowcount:
+                    raise Exception("Update failed: where clause does not match any rows.")
+                desc_from_upper = {k.upper(): k for k in description}
+                updated_values = {desc_from_upper[k.upper()]: v for k, v in values.items()}
+                for row in old_rows:
+                    old = {k: v for k, v in zip(description, row)}
+                    new = {**old, **updated_values}
+                    if old == new:
+                        continue
+                    if self.use_triggers:
+                        self.respond_to_changes(table_name)
+                    else:
+                        for cb in self.update_cbs:
+                            cb(table_name, old, new)
+                self.conn.commit()
+            except Exception as e:
+                self.conn.rollback()
+                raise e
     
-    def execute(self, query):
+    def execute(self, query, values=None):
         with self.lock:
             if DEBUG:
                 print("db.execute", query)
             cursor = self.get_cursor()
             try:
-                cursor.execute(query)
+                if values:
+                    cursor.execute(query, values)
+                else:
+                    cursor.execute(query)
                 return cursor.fetchall()
             except Exception as e:
                 self.conn.rollback()
@@ -1681,9 +1654,7 @@ class Sort(View):
         if self.limit is not None and insert_index >= self.limit:
             return
         if self.offset is not None and self.offset > 0 and insert_index == 0:
-            cursor = self.db.get_cursor()
-            execute(cursor, f"{self.query} LIMIT 1")
-            new_row = cursor.fetchone()
+            new_row = self.db.fetchone(self.query)
         self.sorted_results.insert(insert_index, new_row)
         
         if self.limit is not None and len(self.sorted_results) > self.limit:
