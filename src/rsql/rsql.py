@@ -801,9 +801,7 @@ class Select(View):
             cb(transformed_old_values, transformed_new_values)
 
     def call_delete_cbs(self, values):
-        cursor = self.db.get_cursor()
-        execute(cursor, self.select_query + f" FROM (SELECT " + ", ".join([f"{value_to_sql(value)} AS {col}" for col, value in values.items()]) + ")")
-        transformed_values_values = cursor.fetchone()
+        transformed_values_values = self.db.fetchone(self.select_query + f" FROM (SELECT " + ", ".join([f"{value_to_sql(value)} AS {col}" for col, value in values.items()]) + ")")
         transformed_values = {k: v for k, v in zip(self.columns, transformed_values_values)}
         for cb in self.delete_cbs:
             cb(transformed_values)
@@ -829,10 +827,9 @@ class Where(View):
         self.set_filter(main=main, **where)
     
     def is_where_true(self, values):
-        cursor = self.db.get_cursor()
         placeholders = ', '.join([f"? as '{col}'" for col in values.keys()])
-        execute(cursor, f"SELECT * FROM (SELECT {placeholders}) {self.where_query}", tuple(values.values()))
-        return cursor.fetchone()
+        result = self.db.fetchone(f"SELECT * FROM (SELECT {placeholders}) {self.where_query}", tuple(values.values()))
+        return result
     
     def call_insert_cbs(self, values):
         if self.is_where_true(values):
@@ -917,12 +914,9 @@ class SQLUnion(View):  # typing.Union is used too widely for this class to be na
         self.columns = parent.columns
         self.query = f"{self.parent.query} UNION {self.parent2.query}"
         self.value_hashes_counts = {}
-        cursor = self.db.get_cursor()
-        execute(cursor, self.parent.query)
-        for row in cursor.fetchall():
+        for row in self.db.fetchall(self.parent.query):
             self.value_hashes_counts[tuple(row).__hash__()] = self.value_hashes_counts.get(tuple(row).__hash__(), 0) + 1
-        execute(cursor, self.parent2.query)
-        for row in cursor.fetchall():
+        for row in self.db.fetchall(self.parent2.query):
             self.value_hashes_counts[tuple(row).__hash__()] = self.value_hashes_counts.get(tuple(row).__hash__(), 0) + 1
     
     def call_insert_cbs(self, values):
@@ -967,27 +961,20 @@ class SQLUnion(View):  # typing.Union is used too widely for this class to be na
     
     def call_insert_cbs2(self, values):
         # check parent
-        cursor = self.db.get_cursor()
-        execute(cursor, f"SELECT * FROM ({self.parent.query} WHERE {', '.join([f'{k}=?' for k in values])};", tuple(values.values()))
-        if not cursor.fetchone():
+        if not self.db.fetchone(f"SELECT * FROM ({self.parent.query} WHERE {', '.join([f'{k}=?' for k in values])};", tuple(values.values())):
             for cb in self.insert_cbs:
                 cb(values)
     
     def call_delete_cbs2(self, values):
         # check parent
-        cursor = self.db.get_cursor()
-        execute(cursor, f"SELECT * FROM ({self.parent.query} WHERE {', '.join([f'{k}=?' for k in values])};", tuple(values.values()))
-        if not cursor.fetchone():
+        if not self.db.fetchone(f"SELECT * FROM ({self.parent.query} WHERE {', '.join([f'{k}=?' for k in values])};", tuple(values.values())):
             for cb in self.delete_cbs:
                 cb(values)
 
     def call_update_cbs2(self, old, new):
         # check parent
-        cursor = self.db.get_cursor()
-        execute(cursor, f"SELECT * FROM ({self.parent.query} WHERE {', '.join([f'{k}=?' for k in old])};", tuple(old.values()))
-        old_exists = cursor.fetchone()
-        execute(cursor, f"SELECT * FROM ({self.parent.query} WHERE {', '.join([f'{k}=?' for k in new])};", tuple(new.values()))
-        new_exists = cursor.fetchone()
+        old_exists = self.db.fetchone(f"SELECT * FROM ({self.parent.query} WHERE {', '.join([f'{k}=?' for k in old])};", tuple(old.values()))
+        new_exists = self.db.fetchone(f"SELECT * FROM ({self.parent.query} WHERE {', '.join([f'{k}=?' for k in new])};", tuple(new.values()))
         if (not old_exists) and (not new_exists):
             for cb in self.update_cbs:
                 cb(old, new)
@@ -1011,9 +998,7 @@ class Table(View):
         self.db.update_cbs.append(self.call_update_cbs)
         self.db.insert_cbs.append(self.call_insert_cbs)
         self.db.delete_cbs.append(self.call_delete_cbs)
-        cursor = db.get_cursor()
-        cursor.execute(f"SELECT sql FROM sqlite_master WHERE type='table' AND name= ?;", (_name,))
-        table_exists = cursor.fetchone()
+        table_exists = self.db.fetchone(f"SELECT sql FROM sqlite_master WHERE type='table' AND name= ?;", (_name,))
         self.name = _name
 
         if not table_exists and not columns:
@@ -1028,8 +1013,7 @@ class Table(View):
 
         if table_exists:
             sql = table_exists[0]
-            cursor.execute(f"PRAGMA table_info({_name});")
-            fa = cursor.fetchall()
+            fa = self.db.fetchall(f"PRAGMA table_info({_name});")
             existing_columns = []
             for farow in fa:
                 if farow[5]:
@@ -1053,9 +1037,9 @@ class Table(View):
                 existing_columns_dict = {col.upper(): dtype for col, dtype in existing_columns}
                 for col, dtype in column_definitions:
                     if col.upper() not in existing_columns_dict:
-                        cursor.execute(f"ALTER TABLE {self.name} ADD COLUMN {col} {dtype};")
+                        self.db.execute(f"ALTER TABLE {self.name} ADD COLUMN {col} {dtype};")
         else:
-            cursor.execute(f"CREATE {'TEMP' if self.temp else ''} TABLE {self.name} ({', '.join([f'{col} {dtype}' for col, dtype in column_definitions])})")
+            self.db.execute(f"CREATE {'TEMP' if self.temp else ''} TABLE {self.name} ({', '.join([f'{col} {dtype}' for col, dtype in column_definitions])})")
         self.column_definitions = column_definitions
         self.columns = [col for col, _ in column_definitions]
         self.query = f"SELECT {', '.join(self.columns)} FROM {self.name}"
@@ -1594,6 +1578,21 @@ class Database:
                 else:
                     cursor.execute(query)
                 return cursor.fetchone()
+            except Exception as e:
+                self.conn.rollback()
+                raise e
+    
+    def fetchall(self, query, values=None):
+        with self.lock:
+            if DEBUG:
+                print("db.fetchall", query)
+            cursor = self.get_cursor()
+            try:
+                if values:
+                    cursor.execute(query, values)
+                else:
+                    cursor.execute(query)
+                return cursor.fetchall()
             except Exception as e:
                 self.conn.rollback()
                 raise e
