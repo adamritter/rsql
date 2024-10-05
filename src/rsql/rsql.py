@@ -1405,6 +1405,7 @@ class Database:
         self.conn.execute("PRAGMA journal_size_limit=6144000;")
         self.conn.execute("PRAGMA mmap_size=134217728;") # 128MB
         self.local = threading.local()
+        self.cursor = self.conn.cursor()
         self.lock = threading.RLock()
 
         self.tables = {}
@@ -1414,10 +1415,7 @@ class Database:
         self.get_cursor()
 
     def get_cursor(self):
-        # return self._cursor
-        if not hasattr(self.local, 'cursor'):
-            self.local.cursor = self.conn.cursor()
-        return self.local.cursor
+        return self.cursor
 
     def tables(self):
         return [row[0] for row in self.execute("SELECT name FROM sqlite_master WHERE type='table'")]
