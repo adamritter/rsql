@@ -273,10 +273,14 @@ class View:
         self.is_bool = None
         self.row_table = row_table
         if hasattr(self, 'parent'):
-            self.parent.update_cbs.append(self.call_update_cbs)
-            self.parent.insert_cbs.append(self.call_insert_cbs)
-            self.parent.delete_cbs.append(self.call_delete_cbs)
-            self.parent.reset_cbs.append(self.call_reset_cbs)
+            self.update_cbs_ref = methodref(self.call_update_cbs)
+            self.parent.update_cbs.append(self.update_cbs_ref)
+            self.insert_cbs_ref = methodref(self.call_insert_cbs)
+            self.parent.insert_cbs.append(self.insert_cbs_ref)
+            self.delete_cbs_ref = methodref(self.call_delete_cbs)
+            self.parent.delete_cbs.append(self.delete_cbs_ref)
+            self.reset_cbs_ref = methodref(self.call_reset_cbs)
+            self.parent.reset_cbs.append(self.reset_cbs_ref)
     
     def name_or_query(self):
         return self.name if hasattr(self, 'name') else self.query
@@ -347,9 +351,10 @@ class View:
 
     def __del__(self):
         if hasattr(self, 'parent'):
-            self.parent.update_cbs.remove(self.call_update_cbs)
-            self.parent.insert_cbs.remove(self.call_insert_cbs)
-            self.parent.delete_cbs.remove(self.call_delete_cbs)
+            self.parent.update_cbs.remove(self.update_cbs_ref)
+            self.parent.insert_cbs.remove(self.insert_cbs_ref)
+            self.parent.delete_cbs.remove(self.delete_cbs_ref)
+            self.parent.reset_cbs.remove(self.reset_cbs_ref)
     
     def select(self, **colexprs):
         return Select(self, **colexprs)
@@ -462,10 +467,12 @@ class Join(View):
         self.parent = parent
         self.parent2 = parent2
         super().__init__(parent.db, row_table=parent.row_table)
-        parent2.update_cbs.append(self.call_update_cbs2)
-        parent2.insert_cbs.append(self.call_insert_cbs2)
-        parent2.delete_cbs.append(self.call_delete_cbs2)
-        parent2.reset_cbs.append(self.call_reset_cbs)
+        self.update_cbs_ref2 = methodref(self.call_update_cbs2)
+        self.insert_cbs_ref2 = methodref(self.call_insert_cbs2)
+        self.delete_cbs_ref2 = methodref(self.call_delete_cbs2)
+        parent2.update_cbs.append(self.update_cbs_ref2)
+        parent2.insert_cbs.append(self.insert_cbs_ref2)
+        parent2.delete_cbs.append(self.delete_cbs_ref2)
         on_values = [x.upper() for x in on.values()]
         right_prefix = f"{right_name}." if right_name else ""
         left_prefix = f"{left_name}." if left_name else ""
@@ -685,9 +692,9 @@ class Join(View):
                 f"Join.update: Can not update column {col} because it does not exist in the parent table {self.parent.name}, values: {values}, parent.columns: {self.parent.columns}. Parent2 not yet implemented.")
 
     def __del__(self):
-        self.parent2.update_cbs.remove(self.call_update_cbs2)
-        self.parent2.insert_cbs.remove(self.call_insert_cbs2)
-        self.parent2.delete_cbs.remove(self.call_delete_cbs2)
+        self.parent2.update_cbs.remove(self.update_cbs_ref2)
+        self.parent2.insert_cbs.remove(self.insert_cbs_ref2)
+        self.parent2.delete_cbs.remove(self.delete_cbs_ref2)
         super().__del__()
 
 class Distinct(View):
@@ -855,9 +862,10 @@ class UnionAll(View):
         super().__init__(parent.db, row_table=parent.row_table)
         self.columns = parent.columns
         self.query = f"{self.parent.query} UNION ALL {self.parent2.query}"
-        parent2.update_cbs.append(self.call_update_cbs)
-        parent2.insert_cbs.append(self.call_insert_cbs)
-        parent2.delete_cbs.append(self.call_delete_cbs)
+        # These method refs are creaated by View constructor for self.parent, here they are reused
+        parent2.update_cbs.append(self.update_cbs_ref)
+        parent2.insert_cbs.append(self.insert_cbs_ref)
+        parent2.delete_cbs.append(self.delete_cbs_ref)
 
     def call_insert_cbs(self, values):
         for cb in self.insert_cbs:
@@ -872,19 +880,21 @@ class UnionAll(View):
             cb(old, new)
 
     def __del__(self):
-        self.parent2.update_cbs.remove(self.call_update_cbs)
-        self.parent2.insert_cbs.remove(self.call_insert_cbs)
-        self.parent2.delete_cbs.remove(self.call_delete_cbs)
+        self.parent2.update_cbs.remove(self.update_cbs_ref)
+        self.parent2.insert_cbs.remove(self.insert_cbs_ref)
+        self.parent2.delete_cbs.remove(self.delete_cbs_ref)
 
 class SQLUnion(View):  # typing.Union is used too widely for this class to be named Union
     def __init__(self, parent, parent2) -> Optional[str]:
         self.parent = parent
         self.parent2 = parent2
         super().__init__(parent.db, row_table=parent.row_table)
-        parent2.update_cbs.append(self.call_update_cbs2)
-        parent2.insert_cbs.append(self.call_insert_cbs2)
-        parent2.delete_cbs.append(self.call_delete_cbs2)
-        parent2.reset_cbs.append(self.call_reset_cbs)
+        self.update_cbs_ref2 = methodref(self.call_update_cbs2)
+        self.insert_cbs_ref2 = methodref(self.call_insert_cbs2)
+        self.delete_cbs_ref2 = methodref(self.call_delete_cbs2)
+        parent2.update_cbs.append(self.update_cbs_ref2)
+        parent2.insert_cbs.append(self.insert_cbs_ref2)
+        parent2.delete_cbs.append(self.delete_cbs_ref2)
         if sorted(map(lambda c: c.upper(), parent.columns)) != sorted(map(lambda c: c.upper(), parent2.columns)):
             raise ValueError("Union views must have the same columns.")
         self.columns = parent.columns
@@ -962,18 +972,21 @@ class SQLUnion(View):  # typing.Union is used too widely for this class to be na
                 cb(new)
     
     def __del__(self):
-        self.parent2.update_cbs.remove(self.call_update_cbs2)
-        self.parent2.insert_cbs.remove(self.call_insert_cbs2)
-        self.parent2.delete_cbs.remove(self.call_delete_cbs2)
+        self.parent2.update_cbs.remove(self.update_cbs_ref2)
+        self.parent2.insert_cbs.remove(self.insert_cbs_ref2)
+        self.parent2.delete_cbs.remove(self.delete_cbs_ref2)
 
 class Table(View):
     def __init__(self, db, _name: str, temp=False, **columns: Union[str, Type]):
         super().__init__(db, row_table=_name)
         # self.db = db
         self.temp = temp
-        self.db.update_cbs.append(self.call_update_cbs)
-        self.db.insert_cbs.append(self.call_insert_cbs)
-        self.db.delete_cbs.append(self.call_delete_cbs)
+        self.update_cbs_ref = methodref(self.call_update_cbs)
+        self.insert_cbs_ref = methodref(self.call_insert_cbs)
+        self.delete_cbs_ref = methodref(self.call_delete_cbs)
+        self.db.update_cbs.append(self.update_cbs_ref)
+        self.db.insert_cbs.append(self.insert_cbs_ref)
+        self.db.delete_cbs.append(self.delete_cbs_ref)
         table_exists = self.db.fetchone(f"SELECT sql FROM sqlite_master WHERE type='table' AND name= ?;", (_name,))
         self.name = _name
 
@@ -1064,9 +1077,9 @@ class Table(View):
             cb(values)
     
     def __del__(self):
-        self.db.update_cbs.remove(self.call_update_cbs)
-        self.db.insert_cbs.remove(self.call_insert_cbs)
-        self.db.delete_cbs.remove(self.call_delete_cbs)
+        self.db.update_cbs.remove(self.update_cbs_ref)
+        self.db.insert_cbs.remove(self.insert_cbs_ref)
+        self.db.delete_cbs.remove(self.delete_cbs_ref)
 
     def update_urlm(self, where: dict, **values):
         if where:
@@ -1120,16 +1133,31 @@ class MapValue(Value):
     
     def __str__(self):
         return f"MapValue({self.parent}, {self.f} {self.value})"
-
+# weakmethod
+from weakref import WeakMethod, ref
+# how to use weakmethod?
+def methodref(m):
+    r = WeakMethod(m)
+    def f(*args, **kwargs):
+        rr = r()
+        if rr is None:
+            return
+        return rr(*args, **kwargs)
+    return f
 class ColumnValue(Value):
     def __init__(self, parent, column):
         self.parent = parent
         self.column = column
         super().__init__(self.parent.fetchone()[self.column])
-        self.parent.update_cbs.append(self.call_update_cbs)
-        self.parent.insert_cbs.append(self.call_insert_cbs)
-        self.parent.delete_cbs.append(self.call_delete_cbs)
-        self.parent.reset_cbs.append(self.call_reset_cbs)
+        self.wupdate = methodref(self.call_update_cbs)
+        self.winsert = methodref(self.call_insert_cbs)
+        self.wdelete = methodref(self.call_delete_cbs)
+        self.wreset = methodref(self.call_reset_cbs)
+        self.parent.update_cbs.append(self.wupdate)
+        self.parent.insert_cbs.append(self.winsert)
+        self.parent.delete_cbs.append(self.wdelete)
+        self.parent.reset_cbs.append(self.wreset)
+        
 
     def __repr__(self):
         return f"ColumnValue({self.parent}, {self.column} = {self.value})"
@@ -1158,13 +1186,22 @@ class ColumnValue(Value):
         for cb in self.update_cbs:
             cb(old, self.value)
 
+    def __del__(self):
+        self.parent.update_cbs.remove(self.wupdate)
+        self.parent.insert_cbs.remove(self.winsert)
+        self.parent.delete_cbs.remove(self.wdelete)
+        self.parent.reset_cbs.remove(self.wreset)
+
 class RowValue(Value):
     def __init__(self, parent):
         self.parent = parent
         super().__init__(self.parent.fetchone())
-        self.parent.update_cbs.append(self.call_update_cbs)
-        self.parent.insert_cbs.append(self.call_insert_cbs)
-        self.parent.delete_cbs.append(self.call_delete_cbs)
+        self.update_cbs_ref = methodref(self.call_update_cbs)
+        self.insert_cbs_ref = methodref(self.call_insert_cbs)
+        self.delete_cbs_ref = methodref(self.call_delete_cbs)
+        self.parent.update_cbs.append(self.update_cbs_ref)
+        self.parent.insert_cbs.append(self.insert_cbs_ref)
+        self.parent.delete_cbs.append(self.delete_cbs_ref)
     
     def __repr__(self):
         return f"RowValue({self.parent}, {self.value})"
@@ -1186,11 +1223,16 @@ class RowValue(Value):
         self.value = None
         for cb in self.update_cbs:
             cb(row, None)
+    
+    def __del__(self):
+        self.parent.update_cbs.remove(self.update_cbs_ref)
+        self.parent.insert_cbs.remove(self.insert_cbs_ref)
+        self.parent.delete_cbs.remove(self.delete_cbs_ref)
 
 class GroupBy(View):
     def __init__(self, parent, *group_by_columns, **aggregates):
-        super().__init__(parent.db)
         self.parent = parent
+        super().__init__(parent.db)
         self.group_by_columns = group_by_columns
         self.aggregates = aggregates
 
@@ -1222,11 +1264,6 @@ class GroupBy(View):
 
         self.count_col_name = next((alias for alias, func in aggregates.items() if istartswith(func, 'COUNT')), None)
         self.count_col_index = self.columns.index(self.count_col_name)
-
-        # Set up callback handling
-        self.parent.update_cbs.append(self.call_update_cbs)
-        self.parent.insert_cbs.append(self.call_insert_cbs)
-        self.parent.delete_cbs.append(self.call_delete_cbs)
 
     def call_update_cbs(self, old, new):
 
