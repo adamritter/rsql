@@ -8,7 +8,6 @@
 
  ## Production Readiness features missing
  - Memory leaks (get rid of all memory when HTTP/2.0 closes / timeout)
- - Async support (use context vars instead of globals)
  - Authentication (look at SimpleHTML)
  - Authorization (ACLs and attribute based access control)
  - Serving (look at both SimpleHTML and how Rails does it in docker)
@@ -38,3 +37,6 @@ python examples/qt_todo.py
 ```
 python tests/test.py
 ```
+
+Features:
+- Async multithreading support

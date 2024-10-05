@@ -7,8 +7,9 @@ import threading
 from queue import Queue
 
 # Replace global variables with thread-local storage
-local = threading.local()
-local.tab_id = 0
+import contextvars
+
+tab_id = contextvars.ContextVar('tab_id', default=0)
 last_tab_id = 0
 
 # Replace the global queues dict with a thread-safe defaultdict
@@ -16,11 +17,11 @@ from collections import defaultdict
 queues = defaultdict(Queue)
 
 def append_queue(e):
-    queues[local.tab_id].put(e)
+    queues[tab_id.get()].put(e)
 
 def get_and_clear_queue():
-    q = list(queues[local.tab_id].queue)
-    queues[local.tab_id] = Queue()
+    q = list(queues[tab_id.get()].queue)
+    queues[tab_id.get()] = Queue()
     return q
 
 def append_queue_to(tid, e):
@@ -51,21 +52,21 @@ def with_sqlx(f, app=None):
         args = args[:-2]
         
         if hx_request:
-            local.tab_id = sqlx_tab_id
+            tab_id.set(sqlx_tab_id)
         else:
-            local.tab_id = last_tab_id
+            tab_id.set(last_tab_id)
         
-        # print("args", args, "hx_request", hx_request, "sqlx_tab_id", sqlx_tab_id, "tab_id", local.tab_id, "app", app)
+        # print("args", args, "hx_request", hx_request, "sqlx_tab_id", sqlx_tab_id, "tab_id", tab_id, "app", app)
         global global_app
         global_app = app
         result = f(*args)
 
-        q = list(queues[local.tab_id].queue)
-        queues[local.tab_id] = Queue()
+        q = list(queues[tab_id.get()].queue)
+        queues[tab_id.get()] = Queue()
         
         end_time = time.time()
         render_time = (end_time - start_time) * 1000  # Convert to milliseconds
-        # print("reading queue", local.tab_id, f"Rendering time: {render_time:.2f} ms", "hx_request", hx_request, "read queue", q)
+        # print("reading queue", tab_id, f"Rendering time: {render_time:.2f} ms", "hx_request", hx_request, "read queue", q)
         
         if not hx_request:
             q.append(Script(f"document.body.addEventListener('htmx:configRequest', function(evt) {{ evt.detail.headers['SQLX-Tab-Id'] = '{last_tab_id}';}});"))
@@ -99,7 +100,7 @@ def table(t, cb, header=None, id=None):
     r = fasttag.Table(
         Thead(header) if header else None,
          Tbody(*[Tr(cb(row), id=f"e{abs(row.__hash__())}") for row in t], id=id))
-    tid = local.tab_id
+    tid = tab_id.get()
     t.on_insert(lambda row: append_queue_to(tid, Template(Tbody(Tr(cb(row), id=f"e{abs(row.__hash__())}"), hx_swap_oob=f"beforeend:#{id}"))))
     t.on_delete(lambda row: append_queue_to(tid, Template(Tr(id=f"e{abs(row.__hash__())}", hx_swap_oob="delete"))))
     t.on_update(lambda old, new: append_queue_to(tid, Template(Tr(cb(new),id=f"e{abs(new.__hash__())}", hx_swap_oob=f"outerHTML: #e{abs(old.__hash__())}"))))
@@ -113,7 +114,7 @@ def ulli(t, cb, header=None, id=None):
         *[Li(cb(row), id=f"e{abs(row.__hash__())}") for row in t],
         id=id
     )
-    tid = local.tab_id
+    tid = tab_id.get()
     t.on_insert(lambda row: append_queue_to(tid, Li(cb(row), id=f"e{abs(row.__hash__())}", hx_swap_oob=f"beforeend: #{id}")))
     t.on_delete(lambda row: append_queue_to(tid, Li(id=f"e{abs(row.__hash__())}", hx_swap_oob="delete")))
     t.on_update(lambda old, new: append_queue_to(tid, Li(cb(new), id=f"e{abs(new.__hash__())}", hx_swap_oob=f"outerHTML: #e{abs(old.__hash__())}")) or 
@@ -123,13 +124,13 @@ def ulli(t, cb, header=None, id=None):
 
 def value(v):
     id = nextid()
-    tid = local.tab_id
+    tid = tab_id.get()
     v.onchange(lambda new: append_queue_to(tid, Span(new, id=id, hx_swap_oob=f"true")))
     return Span(v.value, id=id)
 
 def show_if(cond, *args):
     id = nextid()
-    tid = local.tab_id
+    tid = tab_id.get()
     cond.update_cbs.append(lambda old, new: append_queue_to(tid, Span(args, id=id, hx_swap_oob="true", style=None if new else "display: none;")))
     return Span(args, id=id, style=None if cond.value else "display: none;")
 
