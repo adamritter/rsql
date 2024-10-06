@@ -5,16 +5,25 @@ import fasttag
 from rsql import URLM
 import threading
 from queue import Queue
+import uvicorn
+from uvicorn.protocols.http.h11_impl import H11Protocol
+from collections import defaultdict
 
 # Replace global variables with thread-local storage
 import contextvars
 
 tab_id = contextvars.ContextVar('tab_id', default=0)
+accept_port = contextvars.ContextVar('accept_port', default=None)
 last_tab_id = 0
 
 # Replace the global queues dict with a thread-safe defaultdict
 from collections import defaultdict
 queues = defaultdict(Queue)
+tab_ids_by_port = defaultdict(list)
+objects_per_tab = defaultdict(list)
+routes_per_tab = defaultdict(list)
+destructors_per_tab = defaultdict(list)
+
 
 def append_queue(e):
     queues[tab_id.get()].put(e)
@@ -55,8 +64,9 @@ def with_sqlx(f, app=None):
             tab_id.set(sqlx_tab_id)
         else:
             tab_id.set(last_tab_id)
+            tab_ids_by_port[accept_port.get()].append(last_tab_id)
         
-        # print("args", args, "hx_request", hx_request, "sqlx_tab_id", sqlx_tab_id, "tab_id", tab_id, "app", app)
+        # print("args", args, "hx_request", hx_request, "sqlx_tab_id", sqlx_tab_id, "tab_id", tab_id, "app", app, "accept_port", accept_port)
         global global_app
         global_app = app
         result = f(*args)
@@ -101,9 +111,13 @@ def table(t, cb, header=None, id=None):
         Thead(header) if header else None,
          Tbody(*[Tr(cb(row), id=f"e{abs(row.__hash__())}") for row in t], id=id))
     tid = tab_id.get()
-    t.on_insert(lambda row: append_queue_to(tid, Template(Tbody(Tr(cb(row), id=f"e{abs(row.__hash__())}"), hx_swap_oob=f"beforeend:#{id}"))))
-    t.on_delete(lambda row: append_queue_to(tid, Template(Tr(id=f"e{abs(row.__hash__())}", hx_swap_oob="delete"))))
-    t.on_update(lambda old, new: append_queue_to(tid, Template(Tr(cb(new),id=f"e{abs(new.__hash__())}", hx_swap_oob=f"outerHTML: #e{abs(old.__hash__())}"))))
+    objects_per_tab[tid].append(t)
+    destructors_per_tab[tid].append(
+        t.on_insert(lambda row: append_queue_to(tid, Template(Tbody(Tr(cb(row), id=f"e{abs(row.__hash__())}"), hx_swap_oob=f"beforeend:#{id}")))))
+    destructors_per_tab[tid].append(
+        t.on_delete(lambda row: append_queue_to(tid, Template(Tr(id=f"e{abs(row.__hash__())}", hx_swap_oob="delete")))))
+    destructors_per_tab[tid].append(
+        t.on_update(lambda old, new: append_queue_to(tid, Template(Tr(cb(new),id=f"e{abs(new.__hash__())}", hx_swap_oob=f"outerHTML: #e{abs(old.__hash__())}")))))
     return r
 
 def ulli(t, cb, header=None, id=None):
@@ -115,10 +129,17 @@ def ulli(t, cb, header=None, id=None):
         id=id
     )
     tid = tab_id.get()
-    t.on_insert(lambda row: append_queue_to(tid, Li(cb(row), id=f"e{abs(row.__hash__())}", hx_swap_oob=f"beforeend: #{id}")))
-    t.on_delete(lambda row: append_queue_to(tid, Li(id=f"e{abs(row.__hash__())}", hx_swap_oob="delete")))
-    t.on_update(lambda old, new: append_queue_to(tid, Li(cb(new), id=f"e{abs(new.__hash__())}", hx_swap_oob=f"outerHTML: #e{abs(old.__hash__())}")) or 
+    objects_per_tab[tid].append(t)  
+    destructors_per_tab[tid].append(
+        t.on_insert(lambda row: append_queue_to(tid, Li(cb(row), id=f"e{abs(row.__hash__())}", hx_swap_oob=f"beforeend: #{id}")))
+    )
+    destructors_per_tab[tid].append(
+        t.on_delete(lambda row: append_queue_to(tid, Li(id=f"e{abs(row.__hash__())}", hx_swap_oob="delete")))
+    )
+    destructors_per_tab[tid].append(
+        t.on_update(lambda old, new: append_queue_to(tid, Li(cb(new), id=f"e{abs(new.__hash__())}", hx_swap_oob=f"outerHTML: #e{abs(old.__hash__())}")) or 
             append_queue_to(tid, Script(f"console.log('update {old} {new}');"))
+        )
     )
     return r
 
@@ -129,8 +150,10 @@ def value(v):
     return Span(v.value, id=id)
 
 def show_if(cond, *args):
+    global objects_per_tab
     id = nextid()
     tid = tab_id.get()
+    objects_per_tab[tid].append(cond)
     cond.update_cbs.append(lambda old, new: append_queue_to(tid, Span(args, id=id, hx_swap_oob="true", style=None if new else "display: none;")))
     return Span(args, id=id, style=None if cond.value else "display: none;")
 
@@ -178,6 +201,13 @@ def post_method_creator(app):
             name = "lambda"
         url = f"/app/{name}/{random_string(10)}"
         app.post(url)(ws)
+        rr=None
+        for r in app.routes:
+            if r.path == url:
+                rr=r
+        if not rr:
+            raise Exception("route not found")
+        routes_per_tab[tab_id.get()].append(rr)
         return URLM(url, method="POST")
     return decorator
 
@@ -221,3 +251,49 @@ def rsql_html_app(live=True, debug=True, hdrs=static_hdrs, default_hdrs=False, *
     app,rt = fast_app(live=live, debug=debug, hdrs=hdrs, default_hdrs=default_hdrs, **kwargs)
     rtx = rt_with_sqlx(rt, app)
     return app,rtx
+
+class LoggingProtocol(H11Protocol):
+    def connection_made(self, transport):
+        peername = transport.get_extra_info('peername')
+        # print(f"Connection accepted from {peername}")
+        super().connection_made(transport)
+
+    def connection_lost(self, exc):
+        super().connection_lost(exc)
+        # print("Connection closed from", self.client, ", closing ", len(tab_ids_by_port[self.client[1]]), "tabs")
+        for tid in tab_ids_by_port[self.client[1]]:
+            # print("closing tab", tid, "because connection closed", self.client)
+            if tid in queues:
+                del queues[tid]
+            if tid in objects_per_tab:
+                del objects_per_tab[tid]
+            if tid in routes_per_tab:
+                for r in routes_per_tab[tid]:
+                    global_app.routes.remove(r)
+                del routes_per_tab[tid]
+            if tid in destructors_per_tab:
+                for d in destructors_per_tab[tid]:
+                    d()
+                del destructors_per_tab[tid]
+        del tab_ids_by_port[self.client[1]]
+    
+    def data_received(self, data):
+        # print("Data received from", self.client)
+        accept_port.set(self.client[1])
+        super().data_received(data)
+
+
+# Use log_level="critical" to suppress logging
+def rsql_html_serve(app, port=5001, log_level="info", host="0.0.0.0", timeout_keep_alive=600):
+    config = uvicorn.Config(
+        app,
+        host=host,
+        port=port,
+        http=LoggingProtocol,
+        timeout_keep_alive=timeout_keep_alive,
+        log_level=log_level,
+    )
+    print("rsql_html_serve starting server on http://"+host+":"+str(port))
+    server = uvicorn.Server(config)
+    server.run()
+    print("rsql_html_serve server stopped")
