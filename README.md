@@ -7,11 +7,11 @@
  production readiness, documentation, and examples.
 
  ## Production Readiness features missing
- - Memory leaks (get rid of all memory when HTTP/2.0 closes / timeout)
+ - Tab close event should do garbage collection
  - Authentication (look at SimpleHTML)
  - Authorization (ACLs and attribute based access control)
- - Serving (look at both SimpleHTML and how Rails does it in docker)
- - More complex exmample app (multi user chat / todo list)
+ - Serving on remote server (look at both SimpleHTML and how Rails does it in docker)
+ - More complex example app (multi user chat / todo list)
  - PIP, dependency management
  - Pypy support, improve performance
  - More examples, better documentation, better performance

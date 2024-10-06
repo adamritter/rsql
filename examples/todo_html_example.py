@@ -15,7 +15,7 @@ register_tables(rtx, db)
 def get():
     incomplete_count = todo.where(done=False).count()
     return Div(
-        H1("TODO"),
+        H1("TODO6"),
         A("ulli", href="/ulli"),
         Form(
             Input(name="task", placeholder="Task",id="task"),
@@ -125,4 +125,4 @@ if __name__ == '__main__':
     server_call_thread = threading.Thread(target=call_server, daemon=True)
     # server_call_thread.start()
     # serve()
-    rsql_html_serve(app)
+    rsql_html_serve()

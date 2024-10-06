@@ -282,18 +282,36 @@ class LoggingProtocol(H11Protocol):
         accept_port.set(self.client[1])
         super().data_received(data)
 
+import inspect
 
 # Use log_level="critical" to suppress logging
-def rsql_html_serve(app, port=5001, log_level="info", host="0.0.0.0", timeout_keep_alive=600):
-    config = uvicorn.Config(
-        app,
+def rsql_html_serve(appname=None, app='app', port=5001, reload=True, log_level="info", host="0.0.0.0", timeout_keep_alive=600, **argv):
+    print("rsql_html_serve starting server on http://" + host + ":" + str(port))
+    print("Reload is set to:", reload)
+    
+    # __file__ is the path to the current file
+    print("Current file path:", __file__)
+    bk = inspect.currentframe().f_back
+    glb = bk.f_globals
+    code = bk.f_code
+    appname = None
+
+    if not appname:
+            if glb.get('__name__')=='__main__': appname = Path(glb.get('__file__', '')).stem
+            elif code.co_name=='main' and bk.f_back.f_globals.get('__name__')=='__main__': appname = inspect.getmodule(bk).__name__
+    if appname:
+        if not port: port=int(os.getenv("PORT", default=5001))
+        print(f'Link: http://{"localhost" if host=="0.0.0.0" else host}:{port}')
+
+    uvicorn.run(
+        f'{appname}:{app}',
         host=host,
         port=port,
         http=LoggingProtocol,
         timeout_keep_alive=timeout_keep_alive,
         log_level=log_level,
+        reload=reload,
+        workers=1,  # Single worker for reloading
+        **argv
     )
-    print("rsql_html_serve starting server on http://"+host+":"+str(port))
-    server = uvicorn.Server(config)
-    server.run()
     print("rsql_html_serve server stopped")
