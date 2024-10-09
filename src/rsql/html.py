@@ -1,4 +1,4 @@
-import time
+import time, asyncio
 from .helpers import *
 from fasttag import *
 import fasttag
@@ -8,13 +8,13 @@ from queue import Queue
 import uvicorn
 from uvicorn.protocols.http.h11_impl import H11Protocol
 from collections import defaultdict
-
-# Replace global variables with thread-local storage
 import contextvars
+from starlette.websockets import WebSocket
+
 
 tab_id = contextvars.ContextVar('tab_id', default=0)
 accept_port = contextvars.ContextVar('accept_port', default=None)
-last_tab_id = 0
+last_tab_id = 1
 
 # Replace the global queues dict with a thread-safe defaultdict
 from collections import defaultdict
@@ -23,19 +23,15 @@ tab_ids_by_port = defaultdict(list)
 objects_per_tab = defaultdict(list)
 routes_per_tab = defaultdict(list)
 destructors_per_tab = defaultdict(list)
-
-
-def append_queue(e):
-    queues[tab_id.get()].put(e)
-
-def get_and_clear_queue():
-    q = list(queues[tab_id.get()].queue)
-    queues[tab_id.get()] = Queue()
-    return q
-
-def append_queue_to(tid, e):
-    print("append_queue_to", tid, e)
-    queues[tid].put(e)
+sends = {}
+import asyncio
+def send_event(target_tab_id, event):
+    if target_tab_id == tab_id.get():
+        queues[target_tab_id].put(event)
+    elif target_tab_id in sends:
+        asyncio.run(sends[target_tab_id](event))
+    else:
+        queues[target_tab_id].put(event)
 
 def rt_with_sqlx(rt, app):
     def rtx(route):
@@ -45,8 +41,6 @@ def rt_with_sqlx(rt, app):
     return rtx
 
 from inspect import isfunction,ismethod,Parameter,get_annotations
-# htmx.config.headers['X-My-Custom-Header'] = 'customValue';
-
 global_app = None
 
 from functools import wraps
@@ -81,6 +75,8 @@ def with_sqlx(f, app=None):
         if not hx_request:
             q.append(Script(f"document.body.addEventListener('htmx:configRequest', function(evt) {{ evt.detail.headers['SQLX-Tab-Id'] = '{last_tab_id}';}});"))
             q.append(Meta(name="htmx-config", content='{"defaultSwapStyle":"none"}'))
+            if HTMXWS:
+                q.append(Div(hx_ext="ws", ws_connect=f"/htmxws/{last_tab_id}"))
             last_tab_id += 1
         
         if result:
@@ -113,11 +109,11 @@ def table(t, cb, header=None, id=None):
     tid = tab_id.get()
     objects_per_tab[tid].append(t)
     destructors_per_tab[tid].append(
-        t.on_insert(lambda row: append_queue_to(tid, Template(Tbody(Tr(cb(row), id=f"e{abs(row.__hash__())}"), hx_swap_oob=f"beforeend:#{id}")))))
+        t.on_insert(lambda row: send_event(tid, Template(Tbody(Tr(cb(row), id=f"e{abs(row.__hash__())}"), hx_swap_oob=f"beforeend:#{id}")))))
     destructors_per_tab[tid].append(
-        t.on_delete(lambda row: append_queue_to(tid, Template(Tr(id=f"e{abs(row.__hash__())}", hx_swap_oob="delete")))))
+        t.on_delete(lambda row: send_event(tid, Template(Tr(id=f"e{abs(row.__hash__())}", hx_swap_oob="delete")))))
     destructors_per_tab[tid].append(
-        t.on_update(lambda old, new: append_queue_to(tid, Template(Tr(cb(new),id=f"e{abs(new.__hash__())}", hx_swap_oob=f"outerHTML: #e{abs(old.__hash__())}")))))
+        t.on_update(lambda old, new: send_event(tid, Template(Tr(cb(new),id=f"e{abs(new.__hash__())}", hx_swap_oob=f"outerHTML: #e{abs(old.__hash__())}")))))
     return r
 
 def ulli(t, cb, header=None, id=None):
@@ -131,14 +127,14 @@ def ulli(t, cb, header=None, id=None):
     tid = tab_id.get()
     objects_per_tab[tid].append(t)  
     destructors_per_tab[tid].append(
-        t.on_insert(lambda row: append_queue_to(tid, Li(cb(row), id=f"e{abs(row.__hash__())}", hx_swap_oob=f"beforeend: #{id}")))
+        t.on_insert(lambda row: send_event(tid, Li(cb(row), id=f"e{abs(row.__hash__())}", hx_swap_oob=f"beforeend: #{id}")))
     )
     destructors_per_tab[tid].append(
-        t.on_delete(lambda row: append_queue_to(tid, Li(id=f"e{abs(row.__hash__())}", hx_swap_oob="delete")))
+        t.on_delete(lambda row: send_event(tid, Li(id=f"e{abs(row.__hash__())}", hx_swap_oob="delete")))
     )
     destructors_per_tab[tid].append(
-        t.on_update(lambda old, new: append_queue_to(tid, Li(cb(new), id=f"e{abs(new.__hash__())}", hx_swap_oob=f"outerHTML: #e{abs(old.__hash__())}")) or 
-            append_queue_to(tid, Script(f"console.log('update {old} {new}');"))
+        t.on_update(lambda old, new: send_event(tid, Li(cb(new), id=f"e{abs(new.__hash__())}", hx_swap_oob=f"outerHTML: #e{abs(old.__hash__())}")) or 
+            send_event(tid, Script(f"console.log('update {old} {new}');"))
         )
     )
     return r
@@ -146,7 +142,8 @@ def ulli(t, cb, header=None, id=None):
 def value(v):
     id = nextid()
     tid = tab_id.get()
-    v.onchange(lambda new: append_queue_to(tid, Span(new, id=id, hx_swap_oob=f"true")))
+    v.onchange(lambda new: send_event(tid, Span(new, id=id, hx_swap_oob=f"true")))
+    objects_per_tab[tid].append(v)
     return Span(v.value, id=id)
 
 def show_if(cond, *args):
@@ -154,7 +151,7 @@ def show_if(cond, *args):
     id = nextid()
     tid = tab_id.get()
     objects_per_tab[tid].append(cond)
-    cond.update_cbs.append(lambda old, new: append_queue_to(tid, Span(args, id=id, hx_swap_oob="true", style=None if new else "display: none;")))
+    cond.update_cbs.append(lambda old, new: send_event(tid, Span(args, id=id, hx_swap_oob="true", style=None if new else "display: none;")))
     return Span(args, id=id, style=None if cond.value else "display: none;")
 
 
@@ -246,10 +243,27 @@ def Form(*args, onsubmit=None, **kwargs):
     else:
         return fasttag.Form(*args, onsubmit=onsubmit, **kwargs)
 
-
+import asyncio
+HTMXWS = False
 def rsql_html_app(live=True, debug=True, hdrs=static_hdrs, default_hdrs=False, **kwargs):
     app,rt = fast_app(live=live, debug=debug, hdrs=hdrs, default_hdrs=default_hdrs, **kwargs)
     rtx = rt_with_sqlx(rt, app)
+
+    async def on_conn(ws, send):
+        #tid is number after last slash
+        tid = int(ws.url.path.split('/')[-1])
+        sends[tid] = send
+        while True:
+            await asyncio.sleep(1)
+
+    async def on_disconn(ws, send):
+        tid = int(ws.url.path.split('/')[-1])
+        if tid in sends:
+            del sends[tid]
+    if HTMXWS:
+        @app.ws('/htmxws/{tid}', conn=on_conn, disconn=on_disconn)
+        async def on_message(send):
+            pass
     return app,rtx
 
 class LoggingProtocol(H11Protocol):
@@ -284,8 +298,38 @@ class LoggingProtocol(H11Protocol):
 
 import inspect
 
+reqs = 0
+def print_memory_thread():
+    secs = 0
+    global reqs
+    while True:
+        time.sleep(1)
+        secs += 1
+        import psutil
+        process = psutil.Process()
+        memory_info = process.memory_info()
+        print(f"Used memory: {memory_info.rss / 1024 / 1024:.2f} MB, reqs: {reqs}, secs: {secs}, rps: {reqs/secs}")
+
+def simple_load_test_thread(url='/'):
+    global reqs
+    import socket
+    import time
+    time.sleep(0.1)
+    while True:
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.connect(('localhost', 5001))
+            s.sendall(b'GET '+url.encode('utf-8')+b' HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n')
+            response = s.recv(1024)
+            s.close()
+            reqs += 1
+        except Exception as e:
+            print(f"Error calling server: {e}")
+            raise e
+
 # Use log_level="critical" to suppress logging
-def rsql_html_serve(appname=None, app='app', port=5001, reload=True, log_level="info", host="0.0.0.0", timeout_keep_alive=600, **argv):
+def rsql_html_serve(appname=None, app='app', port=5001, reload=True, log_level="info", host="0.0.0.0",
+                    timeout_keep_alive=600, print_memory=False, simple_load_test=None, **argv):
     print("rsql_html_serve starting server on http://" + host + ":" + str(port))
     print("Reload is set to:", reload)
     
@@ -302,6 +346,11 @@ def rsql_html_serve(appname=None, app='app', port=5001, reload=True, log_level="
     if appname:
         if not port: port=int(os.getenv("PORT", default=5001))
         print(f'Link: http://{"localhost" if host=="0.0.0.0" else host}:{port}')
+
+    if print_memory:
+        threading.Thread(target=print_memory_thread, daemon=True).start()
+    if simple_load_test:
+        threading.Thread(target=simple_load_test_thread, args=(simple_load_test,), daemon=True).start()
 
     uvicorn.run(
         f'{appname}:{app}',

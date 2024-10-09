@@ -7,13 +7,13 @@
  production readiness, documentation, and examples.
 
  ## Production Readiness features missing
- - Tab close event should do garbage collection
+- Extra websocket or http keep-alive connection to send async oob data
  - Authentication (look at SimpleHTML)
  - Authorization (ACLs and attribute based access control)
  - Serving on remote server (look at both SimpleHTML and how Rails does it in docker)
  - More complex example app (multi user chat / todo list)
  - PIP, dependency management
- - Pypy support, improve performance
+ - Pypy support, improve performance (or at least don't crash)
  - More examples, better documentation, better performance
 
 ## Clone the repository:
