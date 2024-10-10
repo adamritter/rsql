@@ -9,8 +9,8 @@ import uvicorn
 from uvicorn.protocols.http.h11_impl import H11Protocol
 from collections import defaultdict
 import contextvars
-from starlette.websockets import WebSocket
 
+HTMXWS = True
 
 tab_id = contextvars.ContextVar('tab_id', default=0)
 accept_port = contextvars.ContextVar('accept_port', default=None)
@@ -244,17 +244,13 @@ def Form(*args, onsubmit=None, **kwargs):
         return fasttag.Form(*args, onsubmit=onsubmit, **kwargs)
 
 import asyncio
-HTMXWS = False
 def rsql_html_app(live=True, debug=True, hdrs=static_hdrs, default_hdrs=False, **kwargs):
     app,rt = fast_app(live=live, debug=debug, hdrs=hdrs, default_hdrs=default_hdrs, **kwargs)
     rtx = rt_with_sqlx(rt, app)
 
     async def on_conn(ws, send):
-        #tid is number after last slash
         tid = int(ws.url.path.split('/')[-1])
         sends[tid] = send
-        while True:
-            await asyncio.sleep(1)
 
     async def on_disconn(ws, send):
         tid = int(ws.url.path.split('/')[-1])

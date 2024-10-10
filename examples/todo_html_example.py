@@ -25,7 +25,7 @@ register_tables(rtx, db)
 def get():
     incomplete_count = todo.where(done=False).count()
     return Div(
-        H1("TODO4", id="title"),
+        H1("TODO", id="title"),
         A("ulli", href="/ulli"),
         "Time: ",
         value(timet.only().map(lambda x: f"{x['time']}")),

@@ -7,7 +7,6 @@
  production readiness, documentation, and examples.
 
  ## Production Readiness features missing
-- Extra websocket or http keep-alive connection to send async oob data
  - Authentication (look at SimpleHTML)
  - Authorization (ACLs and attribute based access control)
  - Serving on remote server (look at both SimpleHTML and how Rails does it in docker)
@@ -25,7 +24,7 @@ Install Python 3.12
 
 ## Install dependencies:
 ```
-pip install python-fasthtml
+pip install -r requirements.txt
 ```
 
 ## Run examples:
