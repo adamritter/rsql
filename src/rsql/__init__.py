@@ -4,7 +4,7 @@ from .rsql import *
 # Import the html module
 from . import html
 from . import helpers
-
+from . import auth
 
 # Optionally, you can set metadata for your package
 __version__ = "0.1.0"

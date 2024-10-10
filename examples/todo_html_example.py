@@ -1,14 +1,24 @@
 import sys, time
 sys.path.append("src")
 import rsql
+import fasthtml
 from fasttag import *
 from rsql.html import *
+from dotenv import load_dotenv
+import os
+import rsql.auth
+
+# Load environment variables from the .env file
+load_dotenv()
+
 db = rsql.Database("dbs/todo_html_example.db")
+
 
 todo = db.table("todo", id=rsql.AUTOINCREMENT, task=str, done=bool)
 timet = db.table("time", id=rsql.AUTOINCREMENT, time=float)
 timet.delete()
 timet.insert(time=time.time())
+counts = db.table("counts", id=rsql.AUTOINCREMENT, name=str, count=int)
 # create a new thread that updates the time every second
 import threading
 # def update_time():
@@ -17,15 +27,23 @@ import threading
         # time.sleep(1)
 # threading.Thread(target=update_time).start()
 todo.print()
-app, rtx = rsql_html_app()
+app, rtx = rsql_html_app(before=rsql.auth.before())
+
 register_tables(rtx, db)
+rsql.auth.setup(app)
+
+counts.print()
 
 # http://localhost:5001
 @rtx('/')
-def get():
+def get(auth):
     incomplete_count = todo.where(done=False).count()
     return Div(
+        table(counts, lambda row: (
+            Tr(Td(row.name), Td(row.count))
+        ), header=(Th("Name"), Th("Count")), id="counts"),
         H1("TODO", id="title"),
+        Span("auth", auth), Br(),
         A("ulli", href="/ulli"),
         "Time: ",
         value(timet.only().map(lambda x: f"{x['time']}")),
@@ -43,6 +61,7 @@ def get():
             header=(Th("Task"), Th("Done"), Th("Delete")), id="todos"),
         show_if(todo.where(done=True).count(), Button("Clear completed", onclick=todo.delete_urlm(done=True))),
         Span(value(incomplete_count.map(lambda x: "1 item left" if x == 1 else f"{x} items left"))),
+        A("logout", href="/logout"),
     )
 
 @rtx('/ulli')
