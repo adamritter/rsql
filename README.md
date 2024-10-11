@@ -7,10 +7,11 @@
  production readiness, documentation, and examples.
 
  ## Production Readiness features missing
- - Authentication (look at SimpleHTML)
+ - More complex example apps (multi user chat / todo list / twitter)
+ - Improve authentication: Google, Facebook auth, not logged in but auth option
  - Authorization (ACLs and attribute based access control)
  - Serving on remote server (look at both SimpleHTML and how Rails does it in docker)
- - More complex example app (multi user chat / todo list)
+ 
  - PIP, dependency management
  - Pypy support, improve performance (or at least don't crash)
  - More examples, better documentation, better performance

@@ -322,8 +322,6 @@ class View:
     def fetchone(self, **values):
         query = f"SELECT * FROM ({self.query}) {'WHERE' if values else ''} {', '.join([f'{k}=?' for k in values])}"
         row = self.db.fetchone(query, tuple(values.values()))
-        if row is None:
-            print(f"Warning: Query returned None for: {query}")
         return Row({col: val for col, val in zip(self.columns, self.maybe_to_bool(row))}, self) if row else None
     
     def __repr__(self):
@@ -810,6 +808,13 @@ class Where(View):
         self.set_filter(main=main, **where)
     
     def is_where_true(self, values):
+        if not self.main:
+            # just check vlaues in where
+            for col, value in self.where.items():
+                if values[col] != value:
+                    return False
+            return True
+
         placeholders = ', '.join([f"? as '{col}'" for col in values.keys()])
         result = self.db.fetchone(f"SELECT * FROM (SELECT {placeholders}) {self.where_query}", tuple(values.values()))
         return result
@@ -1064,6 +1069,7 @@ class Table(View):
     def call_insert_cbs(self, table, values):
         if table != self.name:
             return
+        print("Table insert", values)
         values_array = [values[col] for col in self.columns]
         values2 = {k: v for k, v in zip(self.columns, self.maybe_to_bool(values_array))}
         for cb in self.insert_cbs:
@@ -1578,7 +1584,10 @@ class Database:
     def fetchone(self, query, values=None):
         with self.lock:
             if DEBUG:
-                print("db.fetchone", query)
+                if values:
+                    print(f"db.fetchone {query}, values: {values}")
+                else:
+                    print(f"db.fetchone {query}")
             cursor = self.get_cursor()
             try:
                 if values:
@@ -1661,7 +1670,6 @@ class Sort(View):
         else:
             if self.limit is not None and self.limit > limit:
                 self.limit = limit
-                print("set_limit", limit, self.sorted_results)
                 for i in range(len(self.sorted_results) - 1, limit - 1, -1):
                     for cb in self.delete_cbs:
                         cb(i, self.sorted_results[i])
@@ -1683,7 +1691,6 @@ class Sort(View):
                         cb(i, dict(zip(self.parent.columns, self.sorted_results[i])))
 
     def call_insert_cbs(self, values):
-        print("call_insert_cbs", values)
         new_row = tuple(values[col] for col in self.parent.columns)
         insert_index = self.find_insert_index(new_row)
         if self.limit is not None and insert_index >= self.limit:
@@ -1786,3 +1793,12 @@ class Sort(View):
 
     def update(self, where, **values):
         self.parent.update(where, **values)
+    
+    def __iter__(self):
+        return map(
+            lambda values: Row(
+                {col: val for col, val in zip(self.columns, self.maybe_to_bool(values))},
+                self
+            ),
+            self.sorted_results
+        )

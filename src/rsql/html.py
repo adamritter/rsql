@@ -9,6 +9,7 @@ import uvicorn
 from uvicorn.protocols.http.h11_impl import H11Protocol
 from collections import defaultdict
 import contextvars
+import rsql
 
 HTMXWS = True
 
@@ -108,12 +109,22 @@ def table(t, cb, header=None, id=None):
          Tbody(*[Tr(cb(row), id=f"e{abs(row.__hash__())}") for row in t], id=id))
     tid = tab_id.get()
     objects_per_tab[tid].append(t)
-    destructors_per_tab[tid].append(
-        t.on_insert(lambda row: send_event(tid, Template(Tbody(Tr(cb(row), id=f"e{abs(row.__hash__())}"), hx_swap_oob=f"beforeend:#{id}")))))
-    destructors_per_tab[tid].append(
-        t.on_delete(lambda row: send_event(tid, Template(Tr(id=f"e{abs(row.__hash__())}", hx_swap_oob="delete")))))
-    destructors_per_tab[tid].append(
-        t.on_update(lambda old, new: send_event(tid, Template(Tr(cb(new),id=f"e{abs(new.__hash__())}", hx_swap_oob=f"outerHTML: #e{abs(old.__hash__())}")))))
+    if type(t) == rsql.Sort:
+        destructors_per_tab[tid].append(
+            t.on_insert(lambda index, row: send_event(tid, Template(Tbody(Tr(cb(row), id=f"e{abs(row.__hash__())}"),
+                                    hx_swap_oob=(f"afterend: #{id} > :nth-child({index})" if index else f"beforeend: #{id}"))))))
+        destructors_per_tab[tid].append(
+            t.on_update(lambda index, old, new: send_event(tid, Template(Tr(cb(new),id=f"e{abs(new.__hash__())}", 
+                                                                     hx_swap_oob=f"outerHTML: #{id} > :nth-child({index+1})")))))
+        destructors_per_tab[tid].append(
+            t.on_delete(lambda index, row: send_event(tid, Template(hx_swap_oob=f"delete: #{id} > :nth-child({index+1})"))))
+    else:
+        destructors_per_tab[tid].append(
+            t.on_insert(lambda row: send_event(tid, Template(Tbody(Tr(cb(row), id=f"e{abs(row.__hash__())}"), hx_swap_oob=f"beforeend:#{id}")))))
+        destructors_per_tab[tid].append(
+            t.on_delete(lambda row: send_event(tid, Template(Tr(id=f"e{abs(row.__hash__())}", hx_swap_oob="delete")))))
+        destructors_per_tab[tid].append(
+            t.on_update(lambda old, new: send_event(tid, Template(Tr(cb(new),id=f"e{abs(new.__hash__())}", hx_swap_oob=f"outerHTML: #e{abs(old.__hash__())}")))))
     return r
 
 def ulli(t, cb, header=None, id=None):
