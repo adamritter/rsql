@@ -255,9 +255,12 @@ def Form(*args, onsubmit=None, **kwargs):
         return fasttag.Form(*args, onsubmit=onsubmit, **kwargs)
 
 import asyncio
-def rsql_html_app(live=True, debug=True, hdrs=static_hdrs, default_hdrs=False, **kwargs):
+def rsql_html_app(live=True, debug=True, db=None, hdrs=static_hdrs, default_hdrs=False, **kwargs):
     app,rt = fast_app(live=live, debug=debug, hdrs=hdrs, default_hdrs=default_hdrs, **kwargs)
     rtx = rt_with_sqlx(rt, app)
+
+    if db:
+        register_tables(rtx, db)
 
     async def on_conn(ws, send):
         tid = int(ws.url.path.split('/')[-1])

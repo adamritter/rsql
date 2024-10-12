@@ -763,7 +763,7 @@ class Select(View):
             self.mirrors_id = True
         super().__init__(parent.db, row_table=rowtable)
         self.columns = [col for col in colexprs]
-        column_parts = [col if expr == True else f"{value_to_sql(expr)} AS {col}" for col, expr in colexprs.items()]
+        column_parts = [col if expr == True else f"{expr} AS {col}" for col, expr in colexprs.items()]
         self.select_query = f"SELECT {', '.join(column_parts)}"
         self.query = f"SELECT {', '.join(column_parts)} FROM ({self.parent.query})"
     
@@ -1244,7 +1244,7 @@ class GroupBy(View):
 
         # Determine the new columns
         self.columns = list(group_by_columns)
-        self.is_bool = list(map(lambda col: parent.is_bool[parent.columns.index(col)], group_by_columns))
+        self.is_bool = list(map(lambda col: parent.is_bool[parent.columns.index(col)], group_by_columns)) if parent.is_bool else [False] * len(group_by_columns)
         # Check if there's a COUNT aggregation, if not, add it
         has_count = any(istartswith(func, 'COUNT') for func in aggregates.values())
         if not has_count:
@@ -1434,6 +1434,11 @@ class GroupBy(View):
 
         for cb in self.update_cbs:
             cb(dict(zip(self.columns, prev_group)), dict(zip(self.columns, new_group)))
+    
+    def fetchone(self, **values):
+        if not values and tuple([]) in self.group_map:
+            return Row(dict(zip(self.columns, self.group_map[tuple([])])), self)
+        return super().fetchone(**values)
 
 CHECK_SAME_THREAD = False
 
