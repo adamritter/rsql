@@ -65,7 +65,6 @@ def with_sqlx(f, app=None):
         global global_app
         global_app = app
         result = f(*args)
-
         q = list(queues[tab_id.get()].queue)
         queues[tab_id.get()] = Queue()
         
@@ -79,7 +78,7 @@ def with_sqlx(f, app=None):
             if HTMXWS:
                 q.append(Div(hx_ext="ws", ws_connect=f"/htmxws/{last_tab_id}"))
             last_tab_id += 1
-        
+        q.append(HttpHeader("Server-Timing", f"rsql.html;dur={render_time:.2f}"))
         if result:
             return (*q, result)
         else:
@@ -254,9 +253,22 @@ def Form(*args, onsubmit=None, **kwargs):
     else:
         return fasttag.Form(*args, onsubmit=onsubmit, **kwargs)
 
+
+class ServerTimingMiddleware:
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        t = time.time()
+        async def _send(message) -> None:
+            if message['type'] == 'http.response.start':
+                message['headers'].append((b'Server-Timing', f"fasthtml;dur={1000*(time.time() - t):.2f}".encode()))
+            await send(message)
+        await self.app(scope, receive, _send)
+
 import asyncio
-def rsql_html_app(live=True, debug=True, db=None, hdrs=static_hdrs, default_hdrs=False, **kwargs):
-    app,rt = fast_app(live=live, debug=debug, hdrs=hdrs, default_hdrs=default_hdrs, **kwargs)
+def rsql_html_app(live=True, debug=True, db=None, hdrs=static_hdrs, default_hdrs=False, before=None, **kwargs):
+    app,rt = fast_app(live=live, debug=debug, hdrs=hdrs, default_hdrs=default_hdrs, before=before, middleware=[Middleware(ServerTimingMiddleware)], **kwargs)
     rtx = rt_with_sqlx(rt, app)
 
     if db:
@@ -302,9 +314,18 @@ class LoggingProtocol(H11Protocol):
         del tab_ids_by_port[self.client[1]]
     
     def data_received(self, data):
-        # print("Data received from", self.client)
+        print("Data received from", self.client)
         accept_port.set(self.client[1])
+        start_time = time.time()
         super().data_received(data)
+        end_time = time.time()
+        processing_time = (end_time - start_time) * 1000  # Convert to milliseconds
+        server_timing_header = f"server-total;dur={processing_time:.2f}"
+        print(f"Server-Timing: {server_timing_header}")
+    
+    def eof_received(self):
+        super().eof_received()
+        print("EOF received from", self.client)
 
 import inspect
 
