@@ -272,6 +272,7 @@ class View:
         self.unique_keys = []
         self.is_bool = None
         self.row_table = row_table
+        self.tohtml = db.tohtml
         if hasattr(self, 'parent'):
             self.update_cbs_ref = methodref(self.call_update_cbs)
             self.parent.update_cbs.append(self.update_cbs_ref)
@@ -1119,6 +1120,15 @@ class Value():
         cb(self.value)
         self.onchange(cb)
 
+    def __html__(self):
+        r = self.tohtml(self)
+        print(f"__html__ {r}")
+        return r
+    
+    def tohtml(self, valueobj):
+        r = self.parent.tohtml(valueobj)
+        return r
+
 class MapValue(Value):
     def __init__(self, parent, f):
         self.parent = parent
@@ -1455,6 +1465,7 @@ class Database:
         self.local = threading.local()
         self.cursor = self.conn.cursor()
         self.lock = threading.RLock()
+        self.tohtml = None
 
         self.tables = {}
         self.insert_cbs = []

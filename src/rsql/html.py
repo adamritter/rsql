@@ -273,6 +273,7 @@ def rsql_html_app(live=True, debug=True, db=None, hdrs=static_hdrs, default_hdrs
 
     if db:
         register_tables(rtx, db)
+        db.tohtml = value
 
     async def on_conn(ws, send):
         tid = int(ws.url.path.split('/')[-1])
