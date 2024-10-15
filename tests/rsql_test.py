@@ -144,6 +144,41 @@ def test_join(left_outer=False, right_outer=False):
     test(w, lambda: t2.delete())
     # w.__del__()
 
+
+def test_join_no_on(left_outer=False, right_outer=False):
+    t1 = db.table("t6", id=int, name=str)
+    t2 = db.table("t7", id=int, value=int)
+    
+    t1.insert(id=1, name="a")
+    t1.insert(id=2, name="b")
+    t2.insert(id=1, value=10)
+    t2.insert(id=2, value=20)
+    
+    w = t1.join(t2, left_outer=left_outer, right_outer=right_outer)
+    test(w, lambda: t1.insert(id=2, name="c"))
+    test(w, lambda: t2.insert(id=1, value=30))
+    test(w, lambda: t1.insert(id=3, name=None))
+    test(w, lambda: t1.delete(id=2, name="b"))
+    test(w, lambda: t2.update({"value": 25}, id=2))
+    test(w, lambda: t1.update({"name": "d"}, id=1))
+    test(w, lambda: t1.insert(id=5, name="c"))
+    test(w, lambda: t1.update({"id": 7}, id=5))
+    test(w, lambda: t1.delete(id=7, name="c"))
+    test(w, lambda: t2.insert(id=6, value=40))
+    test(w, lambda: t2.update({"value": 45}, id=6))
+    test(w, lambda: t1.delete(id=6, name="c"))
+    test(w, lambda: t2.delete())
+    test(w, lambda: t1.delete())
+    test(w, lambda: t1.insert(id=10, name="a"))
+    w.print()
+    test(w, lambda: t2.insert(id=10, value=100))
+    test(w, lambda: t1.update({"id": 10},  name="e"))
+    test(w, lambda: t2.update({"id": 10}, value=105))
+    w.print()
+    test(w, lambda: t1.delete())
+    test(w, lambda: t2.delete())
+    # w.__del__()
+
 def test_group_by():
     t = db.table("t8", id=int, name=str, value=int)
     t.insert(id=1, name="a", value=10)
@@ -236,13 +271,10 @@ test_union_all()
 print(f"union_all: {N-N0} ops in {time.time()-t0:.2f}s, {(time.time()-t0)/(N-N0)*1000000:.2f} μs/op")
 t0 = time.time()
 N0 = N
-rsql.EXPERIMENTAL_OUTER_JOIN = True
-if rsql.EXPERIMENTAL_OUTER_JOIN:
-    for left_outer in [False, True]:
-        for right_outer in [False, True]:
-            test_join(left_outer, right_outer)
-else:
-    test_join()
+for left_outer in [False, True]:
+    for right_outer in [False, True]:
+        test_join(left_outer, right_outer)
+        test_join_no_on(left_outer, right_outer)
 print(f"join: {N-N0} ops in {time.time()-t0:.2f}s, {(time.time()-t0)/(N-N0)*1000000:.2f} μs/op")
 t0 = time.time()
 N0 = N

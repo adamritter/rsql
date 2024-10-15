@@ -532,7 +532,8 @@ class Join(View):
 
     def call_delete_cbs(self, values):
         # Query to find the matching rows in parent2
-        parent2_matches = self.db.execute(f"SELECT * FROM ({self.parent2.query}) WHERE {', '.join([f'{self.on[k]}=?' for k in self.on.keys()])};", tuple(values[k] for k in self.on.keys()))
+        where_clause = f"WHERE {', '.join([f'{k}=?' for k in self.on.keys()])}" if self.on else ""
+        parent2_matches = self.db.execute(f"SELECT * FROM ({self.parent2.query}) {where_clause}", tuple(values[k] for k in self.on.keys()))
         values_array = [values[col] for col in self.parent.columns]
         for match in parent2_matches:
             if self.left_outer or self.right_outer:
@@ -545,7 +546,8 @@ class Join(View):
             if self.right_outer:
                 # If right outer and there's no match for the joined part anymore in the left table,
                 # Nones are inserted [ update should be probably emitted instead ]
-                parent1_matches = self.db.fetchone(f"SELECT * FROM ({self.parent.query}) WHERE {', '.join([f'{k}=?' for k in self.on.keys()])};", tuple(values[k] for k in self.on.keys()))
+                where_clause = f"WHERE {', '.join([f'{k}=?' for k in self.on.keys()])}" if self.on else ""
+                parent1_matches = self.db.fetchone(f"SELECT * FROM ({self.parent.query}) {where_clause}", tuple(values[k] for k in self.on.keys()))
                 if not parent1_matches:
                     joined_values_array = [None for _ in self.parent.columns] + list(match)
                     joined_values = {col: joined_values_array[i] for i, col in enumerate(self.columns)}
@@ -559,7 +561,8 @@ class Join(View):
 
     def call_update_cbs(self, old, new):
         # First, handle the deletion of the old joined row
-        parent2_matches = self.db.fetchall(f"SELECT * FROM ({self.parent2.query}) WHERE {', '.join([f'{self.on[k]}=?' for k in self.on.keys()])};", tuple(old[k] for k in self.on.keys()))
+        where_clause = f"WHERE {', '.join([f'{k}=?' for k in self.on.keys()])}" if self.on else ""
+        parent2_matches = self.db.fetchall(f"SELECT * FROM ({self.parent2.query}) {where_clause}", tuple(old[k] for k in self.on.keys()))
         to_delete = []
         old_array = [old[col] for col in self.parent.columns]
         new_array = [new[col] for col in self.parent.columns]
@@ -572,7 +575,8 @@ class Join(View):
             to_delete.append(old_joined_array)
 
         # Now, handle the insertion of the new joined row
-        parent2_matches = self.db.fetchall(f"SELECT * FROM ({self.parent2.query}) WHERE {', '.join([f'{self.on[k]}=?' for k in self.on.keys()])};", tuple(new[k] for k in self.on.keys()))
+        where_clause = f"WHERE {', '.join([f'{k}=?' for k in self.on.keys()])}" if self.on else ""
+        parent2_matches = self.db.fetchall(f"SELECT * FROM ({self.parent2.query}) {where_clause}", tuple(new[k] for k in self.on.keys()))
         to_insert = []
         for match in parent2_matches:
             if self.left_outer or self.right_outer:
@@ -598,11 +602,13 @@ class Join(View):
 
     def call_insert_cbs2(self, values):
         # Query to find the matching rows in parent1
-        parent1_matches = self.db.fetchall(f"SELECT * FROM ({self.parent.query}) WHERE {', '.join([f'{k}=?' for k in self.on.keys()])};", tuple(values[self.on[k]] for k in self.on.keys()))
+        where_clause = f"WHERE {', '.join([f'{k}=?' for k in self.on.keys()])}" if self.on else ""
+        parent1_matches = self.db.fetchall(f"SELECT * FROM ({self.parent.query}) {where_clause}", tuple(values[self.on[k]] for k in self.on.keys()))
         values_array = [values[col] for col in self.parent2.columns]
         right_matches_after_insert = None
         if self.left_outer:
-            right_matches_after_insert = len(self.db.fetchall(f"SELECT * FROM ({self.parent2.query}) WHERE {', '.join([f'{k}=?' for k in self.on.values()])} LIMIT 2", tuple(values[self.on[k]] for k in self.on.keys())))
+            where_clause = f"WHERE {', '.join([f'{k}=?' for k in self.on.values()])}" if self.on else ""
+            right_matches_after_insert = len(self.db.fetchall(f"SELECT * FROM ({self.parent2.query}) {where_clause} LIMIT 2", tuple(values[self.on[k]] for k in self.on.keys())))
         for match in parent1_matches:
             if self.left_outer or self.right_outer:
                 joined_values_array = [match[idx] for idx, col in enumerate(self.parent.columns)] + values_array
@@ -626,7 +632,8 @@ class Join(View):
 
     def call_delete_cbs2(self, values):
         # Query to find the matching rows in parent1
-        parent1_matches = self.db.fetchall(f"SELECT * FROM ({self.parent.query}) WHERE {', '.join([f'{k}=?' for k in self.on.keys()])};", tuple(values[self.on[k]] for k in self.on.keys()))
+        where_clause = f"WHERE {', '.join([f'{k}=?' for k in self.on.keys()])}" if self.on else ""
+        parent1_matches = self.db.fetchall(f"SELECT * FROM ({self.parent.query}) {where_clause}", tuple(values[self.on[k]] for k in self.on.keys()))
         values_array = [values[col] for col in self.parent2.columns]
         for match in parent1_matches:
             if self.left_outer or self.right_outer:
@@ -637,7 +644,8 @@ class Join(View):
             for cb in self.delete_cbs:
                 cb(joined_values)
             if self.left_outer:
-                parent2_matches = self.db.fetchone(f"SELECT * FROM ({self.parent2.query}) WHERE {', '.join([f'{k}=?' for k in self.on.keys()])};", tuple(values[k] for k in self.on.keys()))
+                where_clause = f"WHERE {', '.join([f'{k}=?' for k in self.on.keys()])}" if self.on else ""
+                parent2_matches = self.db.fetchone(f"SELECT * FROM ({self.parent2.query}) {where_clause}", tuple(values[k] for k in self.on.keys()))
                 if not parent2_matches:
                     joined_values_array = list(match) + [None for _ in self.parent2.columns]
                     joined_values = {col: joined_values_array[i] for i, col in enumerate(self.columns)}
@@ -652,7 +660,8 @@ class Join(View):
   
     def call_update_cbs2(self, old, new):
         # First, handle the deletion of the old joined row
-        parent1_matches = self.db.fetchall(f"SELECT * FROM ({self.parent.query}) WHERE {', '.join([f'{k}=?' for k in self.on.keys()])};", tuple(old[self.on[k]] for k in self.on.keys()))
+        where_clause = f"WHERE {', '.join([f'{self.on[k]}=?' for k in self.on.keys()])}" if self.on else ""
+        parent1_matches = self.db.fetchall(f"SELECT * FROM ({self.parent.query}) {where_clause}", tuple(old[self.on[k]] for k in self.on.keys()))
         to_delete = []
         to_insert = []
         old_array = [old[col] for col in self.parent2.columns]
@@ -665,7 +674,8 @@ class Join(View):
             to_delete.append(old_joined_array)
 
         # Now, handle the insertion of the new joined row
-        parent1_matches = self.db.fetchall(f"SELECT * FROM ({self.parent.query}) WHERE {', '.join([f'{k}=?' for k in self.on.keys()])};", tuple(new[self.on[k]] for k in self.on.keys()))
+        where_clause = f"WHERE {', '.join([f'{k}=?' for k in self.on.keys()])}" if self.on else ""
+        parent1_matches = self.db.fetchall(f"SELECT * FROM ({self.parent.query}) {where_clause}", tuple(new[self.on[k]] for k in self.on.keys()))
         for match in parent1_matches:
             if self.left_outer or self.right_outer:
                 new_joined_array = [match[idx] for idx, col in enumerate(self.parent.columns)] + new_array
