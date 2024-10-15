@@ -506,10 +506,15 @@ class Join(View):
         as_right_name = f"as {self.right_name}" if self.right_name else ""
         join_type = "FULL OUTER JOIN" if self.left_outer and self.right_outer else (
                     "LEFT OUTER JOIN" if self.left_outer else ("RIGHT OUTER JOIN" if self.right_outer else "JOIN"))
-        self.query = f"SELECT {', '.join(self.columns_with_selectors)} FROM ({self.parent.query}) {as_left_name} {join_type} ({self.parent2.query}) {as_right_name} ON {', '.join([f'{self.left_prefix}{k}={self.right_prefix}{v}' for k, v in self.on.items()])}"
+        on_clause = ""
+        if self.on:
+            on_clause = f"ON {', '.join([f'{self.left_prefix}{k}={self.right_prefix}{v}' for k, v in self.on.items()])}"
+
+        self.query = f"SELECT {', '.join(self.columns_with_selectors)} FROM ({self.parent.query}) {as_left_name} {join_type} ({self.parent2.query}) {as_right_name} {on_clause}"
     
     def call_insert_cbs(self, values):
-        parent2_matches = self.db.fetchall(f"SELECT * FROM ({self.parent2.query}) WHERE {', '.join([f'{self.on[k]}=?' for k in self.on.keys()])};", tuple(values[k] for k in self.on.keys()))
+        where_clause = f"WHERE {', '.join([f'{self.on[k]}=?' for k in self.on.keys()])}" if self.on else ""
+        parent2_matches = self.db.fetchall(f"SELECT * FROM ({self.parent2.query}) {where_clause}", tuple(values[k] for k in self.on.keys()))
         values_array = [values[col] for col in self.parent.columns]
         for match in parent2_matches:
             if self.left_outer or self.right_outer:
@@ -1122,7 +1127,8 @@ class Value():
 
     def __html__(self):
         r = self.tohtml(self)
-        print(f"__html__ {r}")
+        while hasattr(r, "__html__"):
+            r = r.__html__()
         return r
     
     def tohtml(self, valueobj):
@@ -1149,6 +1155,7 @@ class MapValue(Value):
     
     def __str__(self):
         return f"MapValue({self.parent}, {self.f} {self.value})"
+
 # weakmethod
 from weakref import WeakMethod, ref
 # how to use weakmethod?
@@ -1596,7 +1603,7 @@ class Database:
                 return cursor.fetchall()
             except Exception as e:
                 self.conn.rollback()
-                raise e
+                raise Exception(f"Error executing query: {query}" + (f" with values: {values}" if values else "")) from e
     def fetchone(self, query, values=None):
         with self.lock:
             if DEBUG:
@@ -1613,7 +1620,7 @@ class Database:
                 return cursor.fetchone()
             except Exception as e:
                 self.conn.rollback()
-                raise e
+                raise Exception(f"Error executing query: {query}" + (f" with values: {values}" if values else "")) from e
     
     def fetchall(self, query, values=None):
         with self.lock:
@@ -1628,7 +1635,7 @@ class Database:
                 return cursor.fetchall()
             except Exception as e:
                 self.conn.rollback()
-                raise e
+                raise Exception(f"Error executing query: {query}" + (f" with values: {values}" if values else "")) from e
 
     def __del__(self):
         self.conn.close()

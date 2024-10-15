@@ -10,7 +10,7 @@ from uvicorn.protocols.http.h11_impl import H11Protocol
 from collections import defaultdict
 import contextvars
 import rsql
-
+from functools import lru_cache as memoize
 HTMXWS = True
 
 tab_id = contextvars.ContextVar('tab_id', default=0)
@@ -164,6 +164,8 @@ def show_if(cond, *args):
     cond.update_cbs.append(lambda old, new: send_event(tid, Span(args, id=id, hx_swap_oob="true", style=None if new else "display: none;")))
     return Span(args, id=id, style=None if cond.value else "display: none;")
 
+def show_unless(cond, *args):
+    return show_if(cond.map(lambda x: not x), *args)
 
 def register_table(rtx, model):
     name = model.name
@@ -267,7 +269,9 @@ class ServerTimingMiddleware:
         await self.app(scope, receive, _send)
 
 import asyncio
-def rsql_html_app(live=True, debug=True, db=None, hdrs=static_hdrs, default_hdrs=False, before=None, **kwargs):
+def rsql_html_app(live=True, debug=True, db=None, hdrs=static_hdrs, default_hdrs=False, before=None, pico=False, **kwargs):
+    if pico:
+        hdrs.append(picocss)
     app,rt = fast_app(live=live, debug=debug, hdrs=hdrs, default_hdrs=default_hdrs, before=before, middleware=[Middleware(ServerTimingMiddleware)], **kwargs)
     rtx = rt_with_sqlx(rt, app)
 
@@ -315,19 +319,13 @@ class LoggingProtocol(H11Protocol):
         del tab_ids_by_port[self.client[1]]
     
     def data_received(self, data):
-        print("Data received from", self.client)
         accept_port.set(self.client[1])
         start_time = time.time()
         super().data_received(data)
         end_time = time.time()
         processing_time = (end_time - start_time) * 1000  # Convert to milliseconds
         server_timing_header = f"server-total;dur={processing_time:.2f}"
-        print(f"Server-Timing: {server_timing_header}")
     
-    def eof_received(self):
-        super().eof_received()
-        print("EOF received from", self.client)
-
 import inspect
 
 reqs = 0

@@ -15,7 +15,7 @@ scopesrc  = Script(src="/static/css-scope-inline.js")
 picocss   = Link(rel="stylesheet", href="/static/pico.min.css")
 viewport  = Meta(name="viewport", content="width=device-width, initial-scale=1, viewport-fit=cover")
 charset   = Meta(charset="utf-8")
-static_hdrs = [charset, viewport, htmxscr, htmxwsscr, surrsrc, scopesrc, picocss]
+static_hdrs = [charset, viewport, htmxscr, htmxwsscr, surrsrc, scopesrc]
 
 def clr_input(): return Script("document.querySelector('input').value = ''")
 

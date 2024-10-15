@@ -27,7 +27,7 @@ import threading
         # time.sleep(1)
 # threading.Thread(target=update_time).start()
 todo.print()
-app, rtx = rsql_html_app(before=rsql.auth.before())
+app, rtx = rsql_html_app(before=rsql.auth.before(), pico=True)
 
 register_tables(rtx, db)
 rsql.auth.setup(app)
