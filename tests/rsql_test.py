@@ -50,11 +50,16 @@ def test_sort1(t, f):
     assert rows == rows2, (rows, rows2, t.query)
     assert rows == t.sorted_results, (rows, t.sorted_results, t.query)
 
-def test_where():
+def test_where(str_filter=False, both_filters=False):
     t = db.table("t", id=int, name=str)
     t.insert(id=1, name="a")
     t.insert(id=2, name="b")
-    w = t.where(name="a")
+    if both_filters:
+        w = t.where('name="a"').where(name="a")
+    elif str_filter:
+        w = t.where('name="a"').where('name="a"')
+    else:
+        w = t.where(name="a").where(name="a")
     test(w, lambda: t.insert(id=3,name="a"))
     test(w, lambda: t.insert(id=3, name="b"))
     test(w, lambda: t.delete(id=3, name="a"))
@@ -110,7 +115,7 @@ def test_union_all():
     test(w, lambda: t.delete(id=3, name="a"))
     test(w, lambda: t.update({"name": "b"}, name="c"))
 
-def test_join(left_outer=False, right_outer=False):
+def test_join(left_outer=False, right_outer=False, no_on=False):
     t1 = db.table("t6", id=int, name=str)
     t2 = db.table("t7", id=int, value=int)
     
@@ -119,7 +124,10 @@ def test_join(left_outer=False, right_outer=False):
     t2.insert(id=1, value=10)
     t2.insert(id=2, value=20)
     
-    w = t1.join(t2, id="id", left_outer=left_outer, right_outer=right_outer)
+    if no_on:
+        w = t1.join(t2, left_outer=left_outer, right_outer=right_outer)
+    else:
+        w = t1.join(t2, id="id", left_outer=left_outer, right_outer=right_outer)
     test(w, lambda: t1.insert(id=2, name="c"))
     test(w, lambda: t2.insert(id=1, value=30))
     test(w, lambda: t1.insert(id=3, name=None))
@@ -139,45 +147,17 @@ def test_join(left_outer=False, right_outer=False):
     test(w, lambda: t2.insert(id=10, value=100))
     test(w, lambda: t1.update({"id": 10},  name="e"))
     test(w, lambda: t2.update({"id": 10}, value=105))
+    t1.print()
+    t2.print()
     w.print()
+    test(w, lambda: t1.update({}, id=20))
+    test(w, lambda: t2.update({}, id=20))
+    test(w, lambda: t2.update({}, id=10))
+    test(w, lambda: t1.update({}, id=10))
     test(w, lambda: t1.delete())
     test(w, lambda: t2.delete())
     # w.__del__()
 
-
-def test_join_no_on(left_outer=False, right_outer=False):
-    t1 = db.table("t6", id=int, name=str)
-    t2 = db.table("t7", id=int, value=int)
-    
-    t1.insert(id=1, name="a")
-    t1.insert(id=2, name="b")
-    t2.insert(id=1, value=10)
-    t2.insert(id=2, value=20)
-    
-    w = t1.join(t2, left_outer=left_outer, right_outer=right_outer)
-    test(w, lambda: t1.insert(id=2, name="c"))
-    test(w, lambda: t2.insert(id=1, value=30))
-    test(w, lambda: t1.insert(id=3, name=None))
-    test(w, lambda: t1.delete(id=2, name="b"))
-    test(w, lambda: t2.update({"value": 25}, id=2))
-    test(w, lambda: t1.update({"name": "d"}, id=1))
-    test(w, lambda: t1.insert(id=5, name="c"))
-    test(w, lambda: t1.update({"id": 7}, id=5))
-    test(w, lambda: t1.delete(id=7, name="c"))
-    test(w, lambda: t2.insert(id=6, value=40))
-    test(w, lambda: t2.update({"value": 45}, id=6))
-    test(w, lambda: t1.delete(id=6, name="c"))
-    test(w, lambda: t2.delete())
-    test(w, lambda: t1.delete())
-    test(w, lambda: t1.insert(id=10, name="a"))
-    w.print()
-    test(w, lambda: t2.insert(id=10, value=100))
-    test(w, lambda: t1.update({"id": 10},  name="e"))
-    test(w, lambda: t2.update({"id": 10}, value=105))
-    w.print()
-    test(w, lambda: t1.delete())
-    test(w, lambda: t2.delete())
-    # w.__del__()
 
 def test_group_by():
     t = db.table("t8", id=int, name=str, value=int)
@@ -277,7 +257,9 @@ test_select()
 print(f"select: {N-N0} ops in {time.time()-t0:.2f}s, {(time.time()-t0)/(N-N0)*1000000:.2f} μs/op")
 t0 = time.time()
 N0 = N
-test_where()
+for str_filter in [False, True]:
+    for both_filters in [False, True]:
+        test_where(str_filter, both_filters)
 print(f"where: {N-N0} ops in {time.time()-t0:.2f}s, {(time.time()-t0)/(N-N0)*1000000:.2f} μs/op")
 t0 = time.time()
 N0 = N
@@ -295,8 +277,8 @@ t0 = time.time()
 N0 = N
 for left_outer in [False, True]:
     for right_outer in [False, True]:
-        test_join(left_outer, right_outer)
-        test_join_no_on(left_outer, right_outer)
+        for no_on in [False, True]:
+            test_join(left_outer, right_outer, no_on)
 print(f"join: {N-N0} ops in {time.time()-t0:.2f}s, {(time.time()-t0)/(N-N0)*1000000:.2f} μs/op")
 t0 = time.time()
 N0 = N
@@ -322,7 +304,7 @@ def map_value_test():
     v = rsql.Value(1)
     m = rsql.MapValue(v, lambda x: x*2)
     assert_eq(m.value, 2)
-    
+
 
 
 
