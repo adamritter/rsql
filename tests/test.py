@@ -6,7 +6,7 @@ suite = unittest.TestLoader().loadTestsFromModule(row_test)
 unittest.TextTestRunner(verbosity=2).run(suite)
 
 import tests.qt_test as qt_test
-
+import tests.html_test as html_test
 
 
 

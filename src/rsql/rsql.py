@@ -19,7 +19,7 @@
 # - query editor
 # - schema editor
 # - Python vs Ruby comparision (ruby 2x slower, probably a bit nicer API, but not that much difference. insert/delete much slower for some reason, also need prepare statement)
-import os, threading
+import os, threading, traceback
 from urllib.parse import urlencode
 
 DEBUG = os.environ.get('DEBUG', 'False').lower() in ['true', '1', 'yes', 'on']
@@ -272,7 +272,6 @@ class View:
         self.unique_keys = []
         self.is_bool = None
         self.row_table = row_table
-        self.tohtml = db.tohtml
         if hasattr(self, 'parent'):
             self.update_cbs_ref = methodref(self.call_update_cbs)
             self.parent.update_cbs.append(self.update_cbs_ref)
@@ -282,6 +281,9 @@ class View:
             self.parent.delete_cbs.append(self.delete_cbs_ref)
             self.reset_cbs_ref = methodref(self.call_reset_cbs)
             self.parent.reset_cbs.append(self.reset_cbs_ref)
+    
+    def tohtml(self, valueobj):
+        return self.db.tohtml(valueobj)
     
     def name_or_query(self):
         return self.name if hasattr(self, 'name') else self.query
@@ -1114,22 +1116,16 @@ class Table(View):
 class Value():
     def __init__(self, value):
         self.value = value
-        self.update_cbs = []
-        self.delete_cbs = []
-        self.insert_cbs = []
+        self.cbs = []
 
     def map(self, f):
         return MapValue(self, f)
     
     def onchange(self, cb):
-        self.update_cbs.append(lambda old, new: cb(new))
-        self.delete_cbs.append(lambda row: cb(None))
-        self.insert_cbs.append(lambda new: cb(new))
+        self.cbs.append(cb)
 
     def onstr(self, cb):
-        self.update_cbs.append(lambda old, new: cb(str(new)))
-        self.delete_cbs.append(lambda row: cb(""))
-        self.insert_cbs.append(lambda new: cb(str(new)))
+        self.cbs.append(lambda v: cb(str(v)))
 
     def onvalue(self, cb):
         cb(self.value)
@@ -1142,24 +1138,24 @@ class Value():
         return r
     
     def tohtml(self, valueobj):
-        r = self.parent.tohtml(valueobj)
+        try: 
+            r = self.parent.tohtml(valueobj)
+        except:
+            raise Exception(f"error in tohtml: {self}, parent: {self.parent}, self.parent.tohtml: {self.parent.tohtml}, valueobj: {valueobj}, traceback: {traceback.format_exc()}")
         return r
 
 class MapValue(Value):
     def __init__(self, parent, f):
         self.parent = parent
         self.f = f
-        self.parent.update_cbs.append(self.call_update_cbs)
+        self.parent.onchange(self.call_cbs)
         super().__init__(self.f(self.parent.value))
 
-    def call_update_cbs(self, old, new):
-        self.value = self.f(new)
-        for cb in self.update_cbs:
-            cb(self.f(old), self.f(new))
+    def call_cbs(self, v):
+        self.value = self.f(v)
+        for cb in self.cbs:
+            cb(self.value)
 
-    def map(self, f):
-        return MapValue(self, f)
-    
     def __repr__(self):
         return f"MapValue({self.parent}, {self.f} {self.value})"
     
@@ -1198,26 +1194,26 @@ class ColumnValue(Value):
     def __str__(self):
         return f"ColumnValue({self.parent}, {self.column} = {self.value})"
     
-    def call_update_cbs(self, old, new):
+    def call_update_cbs(self, _, new):
         self.value = new[self.column]
-        for cb in self.update_cbs:
-            cb(old[self.column], new[self.column])
+        for cb in self.cbs:
+            cb(new[self.column])
     
     def call_insert_cbs(self, new):
         self.value = new[self.column]
-        for cb in self.update_cbs:
-            cb(None, new[self.column])
+        for cb in self.cbs:
+            cb(new[self.column])
     
-    def call_delete_cbs(self, row):
+    def call_delete_cbs(self, _):
         self.value = None
-        for cb in self.update_cbs:
-            cb(row[self.column], None)
+        for cb in self.cbs:
+            cb(None)
     
     def call_reset_cbs(self):
         old = self.value
         self.value = self.parent.fetchone()[self.column]
         for cb in self.update_cbs:
-            cb(old, self.value)
+            cb(self.value)
 
     def __del__(self):
         self.parent.update_cbs.remove(self.wupdate)
@@ -1242,20 +1238,20 @@ class RowValue(Value):
     def __str__(self):
         return f"RowValue({self.parent}, {self.value})"
     
-    def call_update_cbs(self, old, new):
-        self.value = self.parent.fetchone()
-        for cb in self.update_cbs:
-            cb(old, new)
+    def call_update_cbs(self, _, new):
+        self.value = Row(new, self.parent)
+        for cb in self.cbs:
+            cb(self.value)
     
     def call_insert_cbs(self, new):
-        self.value = self.parent.fetchone()
-        for cb in self.update_cbs:
-            cb(None, new)
+        self.value = Row(new, self.parent)
+        for cb in self.cbs:
+            cb(self.value)
     
-    def call_delete_cbs(self, row):
+    def call_delete_cbs(self, _):
         self.value = None
-        for cb in self.update_cbs:
-            cb(row, None)
+        for cb in self.cbs:
+            cb(None)
     
     def __del__(self):
         self.parent.update_cbs.remove(self.update_cbs_ref)

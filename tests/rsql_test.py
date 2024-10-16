@@ -246,6 +246,28 @@ def test_sort_limit():
     test_sort1(w, lambda: t.update({"name": "d"}, id=1))
     test_sort1(w, lambda: t.delete(id=6, name="c"))
 
+changedvalue = None
+currentvalue = None
+
+def value_test():
+    db = rsql.Database(":memory:")
+    nextstep = db.table("nextstep", nextstep=int)
+    nextstep.delete()
+    nextstep.insert(nextstep=1)
+    o=nextstep.only()
+    def setchangedvalue(x):
+        global changedvalue
+        changedvalue = x
+    def setcurrentvalue(x):
+        global currentvalue
+        currentvalue = x
+    o.onchange(lambda x: setchangedvalue(x))
+    o.onvalue(lambda x: setcurrentvalue(x))
+    assert_eq(changedvalue, None)
+    assert_eq(currentvalue['nextstep'], 1)
+    nextstep.update({}, nextstep=2)
+    assert_eq(changedvalue['nextstep'], 2)
+    assert_eq(currentvalue['nextstep'], 2)
 
 t=time.time()
 db = rsql.Database(":memory:")
@@ -292,4 +314,22 @@ t0 = time.time()
 N0 = N
 test_sort_limit()
 print(f"sort_limit: {N-N0} ops in {time.time()-t0:.2f}s, {(time.time()-t0)/(N-N0)*1000000:.2f} μs/op")
-print(f"All tests pass ({N} ops in {time.time()-t:.2f}s),  {((time.time()-t)/N)*1000000:.2f} μs/op")
+print(f"All table tests pass ({N} ops in {time.time()-t:.2f}s),  {((time.time()-t)/N)*1000000:.2f} μs/op")
+value_test()
+
+
+def map_value_test():
+    v = rsql.Value(1)
+    m = rsql.MapValue(v, lambda x: x*2)
+    assert_eq(m.value, 2)
+    
+
+
+
+def html_test():
+    db=rsql.Database(":memory:")
+    a=db.table("a", b=int) 
+    a.insert(b=2)
+    o=a.only() # RowValue
+    print(o.value)
+html_test()

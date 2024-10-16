@@ -2,7 +2,7 @@ import time, asyncio
 from .helpers import *
 from fasttag import *
 import fasttag
-from rsql import URLM
+from rsql import URLM, Database
 import threading
 from queue import Queue
 import uvicorn
@@ -65,6 +65,14 @@ def with_sqlx(f, app=None):
         global global_app
         global_app = app
         result = f(*args)
+        if isinstance(result, tuple):
+            t = []
+            for r in result:
+                if isinstance(r, rsql.Value):
+                    t.append(value(r))
+                else:
+                    t.append(r)
+            result = tuple(t)
         q = list(queues[tab_id.get()].queue)
         queues[tab_id.get()] = Queue()
         
@@ -97,8 +105,6 @@ def nextid():
     global lastid
     lastid += 1
     return f"e{lastid}"
-
-
 
 def table(t, cb, header=None, id=None):
     if not id:
@@ -149,9 +155,12 @@ def ulli(t, cb, header=None, id=None):
     )
     return r
 
-def value(v):
+def value(v, tab_id0=None):
     id = nextid()
-    tid = tab_id.get()
+    if tab_id0:
+        tid = tab_id0.get()
+    else:
+        tid = tab_id.get()
     v.onchange(lambda new: send_event(tid, Span(new, id=id, hx_swap_oob=f"true")))
     objects_per_tab[tid].append(v)
     return Span(v.value, id=id)
@@ -161,7 +170,7 @@ def show_if(cond, *args):
     id = nextid()
     tid = tab_id.get()
     objects_per_tab[tid].append(cond)
-    cond.update_cbs.append(lambda old, new: send_event(tid, Span(args, id=id, hx_swap_oob="true", style=None if new else "display: none;")))
+    cond.onchange(lambda value: send_event(tid, Span(args, id=id, hx_swap_oob="true", style=None if value else "display: none;")))
     return Span(args, id=id, style=None if cond.value else "display: none;")
 
 def show_unless(cond, *args):
@@ -277,7 +286,8 @@ def rsql_html_app(live=True, debug=True, db=None, hdrs=static_hdrs, default_hdrs
 
     if db:
         register_tables(rtx, db)
-        db.tohtml = value
+        tab_id0 = tab_id
+        db.tohtml = lambda v: value(v, tab_id0)
 
     async def on_conn(ws, send):
         tid = int(ws.url.path.split('/')[-1])
