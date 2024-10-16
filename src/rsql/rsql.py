@@ -59,8 +59,8 @@ def execute(cursor, query, params=None):
         else:
             return cursor.execute(query)
     except Exception as e:
-        print(f"Error executing query: {query} with params {params}")
-        raise e
+        raise Exception(f"Error executing query: {query} with params {params}") from e
+
     
 def create_where_null_clause(columns, values):
     where_conditions = []
@@ -562,6 +562,7 @@ class Join(View):
                 cb(joined_values)
 
     def call_update_cbs(self, old, new):
+        print("join calling update_cbs", old, new)
         # First, handle the deletion of the old joined row
         where_clause = f"WHERE {', '.join([f'{k}=?' for k in self.on.keys()])}" if self.on else ""
         parent2_matches = self.db.fetchall(f"SELECT * FROM ({self.parent2.query}) {where_clause}", tuple(old[k] for k in self.on.keys()))
@@ -661,6 +662,7 @@ class Join(View):
                 cb(joined_values)
   
     def call_update_cbs2(self, old, new):
+        print("join calling update_cbs2", old, new)
         # First, handle the deletion of the old joined row
         where_clause = f"WHERE {', '.join([f'{self.on[k]}=?' for k in self.on.keys()])}" if self.on else ""
         parent1_matches = self.db.fetchall(f"SELECT * FROM ({self.parent.query}) {where_clause}", tuple(old[self.on[k]] for k in self.on.keys()))
@@ -693,6 +695,10 @@ class Join(View):
             for values in to_insert:
                 values_dict = {self.columns[i]: values[i] for i in range(len(self.columns))}
                 for cb in self.insert_cbs:
+                    cb(values_dict)
+            for values in to_delete:
+                values_dict = {self.columns[i]: values[i] for i in range(len(self.columns))}
+                for cb in self.delete_cbs:
                     cb(values_dict)
 
     def update(self, where, **values):
@@ -828,7 +834,7 @@ class Where(View):
     def is_where_true(self, values):
         if not self.main:
             # just check vlaues in where
-            for col, value in self.where.items():
+            for col, value in self._where.items():
                 if values[col] != value:
                     return False
             return True
@@ -854,16 +860,18 @@ class Where(View):
             for cb in self.update_cbs:
                 cb(old, new)
         elif old_exists:
+            print("where calling delete_cbs")
             for cb in self.delete_cbs:
                 cb(old)
         elif new_exists:
+            print("where calling insert_cbs")
             for cb in self.insert_cbs:
                 cb(new)
 
     def set_filter(self, main=None, **where):
         self.main = main
-        self.where = where
-        self.where_query = f"{'WHERE' if main or where else ''} {('(' + main + ') AND ') if main else ''} {' AND '.join([f'{col}={value.__repr__()}' for col, value in where.items()])}"
+        self._where = where
+        self.where_query = f"{'WHERE' if main or where else ''} {('(' + main + ')' if main else '') + (' AND ' if main and where else '')} {' AND '.join([f'{col}={value.__repr__()}' for col, value in where.items()])}"
         self.reset()
         for cb in self.reset_cbs:
             cb()
@@ -872,9 +880,9 @@ class Where(View):
         self.query = f"SELECT * FROM ({self.parent.query}) {self.where_query}"
 
     def update(self, where, **values):
-        # print(f"Where: Updating {self.parent.name} with {where} and {values}")
+        print(f"Where: Updating {self.parent.name} with {where} and {values}")
         if self.main is not None or "id" in where:
-            self.parent.update({**where, **self.where}, **values)
+            self.parent.update({**where, **self._where}, **values)
         else:
             raise ValueError(f"Can not update without id in where for self.query {self.query}, self.main: {self.main}, self.where: {self.where}, where: {where}, values: {values}")
 
