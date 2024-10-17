@@ -110,8 +110,8 @@ def table(t, cb, header=None, id=None):
     if not id:
         id = nextid()
     r = fasttag.Table(
-        Thead(header) if header else None,
-         Tbody(*[Tr(cb(row), id=f"e{abs(row.__hash__())}") for row in t], id=id))
+        *([Thead(header)] if header else []),
+        Tbody(*[Tr(cb(row), id=f"e{abs(row.__hash__())}") for row in t], id=id))
     tid = tab_id.get()
     objects_per_tab[tid].append(t)
     if type(t) == rsql.Sort:
