@@ -23,6 +23,7 @@ import os, threading, traceback
 from urllib.parse import urlencode
 
 DEBUG = os.environ.get('DEBUG', 'False').lower() in ['true', '1', 'yes', 'on']
+DEBUG_VIEWS = os.environ.get('DEBUG_VIEWS', 'False').lower() in ['true', '1', 'yes', 'on']
 
 import sqlite3, importlib, sys, time, typing, weakref
 from typing import Optional, Union, Type
@@ -518,6 +519,10 @@ class Join(View):
         where_clause = f"WHERE {', '.join([f'{self.on[k]}=?' for k in self.on.keys()])}" if self.on else ""
         parent2_matches = self.db.fetchall(f"SELECT * FROM ({self.parent2.query}) {where_clause}", tuple(values[k] for k in self.on.keys()))
         values_array = [values[col] for col in self.parent.columns]
+        left_matches_after_insert = None
+        if self.right_outer:
+            where_clause = f"WHERE {', '.join([f'{k}=?' for k in self.on.values()])}" if self.on else ""
+            left_matches_after_insert = len(self.db.fetchall(f"SELECT * FROM ({self.parent.query}) {where_clause} LIMIT 2", tuple(values[self.on[k]] for k in self.on.keys())))
         for match in parent2_matches:
             if self.left_outer or self.right_outer:
                 joined_values_array = values_array + list(match)
@@ -526,6 +531,11 @@ class Join(View):
             joined_values = {col: joined_values_array[i] for i, col in enumerate(self.columns)}
             for cb in self.insert_cbs:
                 cb(joined_values)
+            if self.right_outer and left_matches_after_insert == 1:
+                joined_values_array = [None for _ in self.parent.columns] + list(match)
+                joined_values = {col: joined_values_array[i] for i, col in enumerate(self.columns)}
+                for cb in self.delete_cbs:
+                    cb(joined_values)
         if not parent2_matches and self.left_outer:
             joined_values_array = values_array + [None for _ in self.parent2.columns]
             joined_values = {col: joined_values_array[i] for i, col in enumerate(self.columns)}
@@ -562,7 +572,39 @@ class Join(View):
                 cb(joined_values)
 
     def call_update_cbs(self, old, new):
-        print("join calling update_cbs", old, new)
+        # Check if key changed:
+        old_key = tuple([old[k] for k in self.on.keys()])
+        new_key = tuple([new[k] for k in self.on.keys()])
+        if old_key == new_key:
+            # Handle update by checking in the right table
+            where_clause = f"WHERE {', '.join([f'{k}=?' for k in self.on.keys()])}" if self.on else ""
+            parent2_matches = self.db.fetchall(f"SELECT * FROM ({self.parent2.query}) {where_clause}", old_key)
+            old_array = [old[col] for col in self.parent.columns] 
+            new_array = [new[col] for col in self.parent.columns]
+            for match in parent2_matches:
+                if self.left_outer or self.right_outer:
+                    old_joined_array = old_array + list(match)
+                    new_joined_array = new_array + list(match)
+                else:
+                    old_joined_array = old_array + [match[idx] for idx, col in enumerate(self.parent2.columns) if col not in self.on.values()]
+                    new_joined_array = new_array + [match[idx] for idx, col in enumerate(self.parent2.columns) if col not in self.on.values()]
+                old_joined_values = {col: old_joined_array[i] for i, col in enumerate(self.columns)}
+                new_joined_values = {col: new_joined_array[i] for i, col in enumerate(self.columns)}
+                for cb in self.update_cbs:
+                    cb(old_joined_values, new_joined_values)
+            if not parent2_matches and self.right_outer:
+                old_joined_array = old_array + [None for _ in self.parent2.columns]
+                old_joined_values = {col: old_joined_array[i] for i, col in enumerate(self.columns)}
+                new_joined_array = new_array + [None for _ in self.parent2.columns]
+                new_joined_values = {col: new_joined_array[i] for i, col in enumerate(self.columns)}
+                for cb in self.update_cbs:
+                    cb(old_joined_values, new_joined_values)
+            return
+        if self.left_outer or self.right_outer:
+            # Just call insert and delete for now
+            self.call_insert_cbs(new)
+            self.call_delete_cbs(old)
+            return
         # First, handle the deletion of the old joined row
         where_clause = f"WHERE {', '.join([f'{k}=?' for k in self.on.keys()])}" if self.on else ""
         parent2_matches = self.db.fetchall(f"SELECT * FROM ({self.parent2.query}) {where_clause}", tuple(old[k] for k in self.on.keys()))
@@ -662,7 +704,38 @@ class Join(View):
                 cb(joined_values)
   
     def call_update_cbs2(self, old, new):
-        print("join calling update_cbs2", old, new)
+        old_key = tuple([old[k] for k in self.on.keys()])
+        new_key = tuple([new[k] for k in self.on.keys()])
+        if old_key == new_key:
+            # Handle update by checking in the right table
+            where_clause = f"WHERE {', '.join([f'{k}=?' for k in self.on.keys()])}" if self.on else ""
+            parent_matches = self.db.fetchall(f"SELECT * FROM ({self.parent.query}) {where_clause}", old_key)
+            old_array = [old[col] for col in self.parent2.columns] 
+            new_array = [new[col] for col in self.parent2.columns]
+            for match in parent_matches:
+                if self.left_outer or self.right_outer:
+                    old_joined_array = list(match) + old_array
+                    new_joined_array = list(match) + new_array
+                else:
+                    old_joined_array = list(match) + [old[col] for col in self.parent2.columns if col not in self.on.values()]
+                    new_joined_array = list(match) + [new[col] for col in self.parent2.columns if col not in self.on.values()]
+                old_joined_values = {col: old_joined_array[i] for i, col in enumerate(self.columns)}
+                new_joined_values = {col: new_joined_array[i] for i, col in enumerate(self.columns)}
+                for cb in self.update_cbs:
+                    cb(old_joined_values, new_joined_values)
+            if not parent_matches and self.left_outer:
+                old_joined_array = [None for _ in self.parent.columns] + old_array
+                old_joined_values = {col: old_joined_array[i] for i, col in enumerate(self.columns)}
+                new_joined_array = [None for _ in self.parent.columns] + new_array
+                new_joined_values = {col: new_joined_array[i] for i, col in enumerate(self.columns)}
+                for cb in self.update_cbs:
+                    cb(old_joined_values, new_joined_values)
+            return
+        if self.left_outer or self.right_outer:
+            # Just call insert and delete for now
+            self.call_insert_cbs2(new)
+            self.call_delete_cbs2(old)
+            return
         # First, handle the deletion of the old joined row
         where_clause = f"WHERE {', '.join([f'{self.on[k]}=?' for k in self.on.keys()])}" if self.on else ""
         parent1_matches = self.db.fetchall(f"SELECT * FROM ({self.parent.query}) {where_clause}", tuple(old[self.on[k]] for k in self.on.keys()))
@@ -860,11 +933,9 @@ class Where(View):
             for cb in self.update_cbs:
                 cb(old, new)
         elif old_exists:
-            print("where calling delete_cbs")
             for cb in self.delete_cbs:
                 cb(old)
         elif new_exists:
-            print("where calling insert_cbs")
             for cb in self.insert_cbs:
                 cb(new)
 
@@ -1472,6 +1543,50 @@ class GroupBy(View):
         return super().fetchone(**values)
 
 CHECK_SAME_THREAD = False
+import gc
+
+def hash(x):
+    if isinstance(x, dict):
+        return hash(frozenset(x.items()))
+    return x.__hash__()
+
+
+def track_view(obj):
+    rows = obj.fetchall()
+    def delete_row(row):
+        try:
+            rowa = tuple([row[col] for col in obj.columns])
+            rows.remove(rowa)
+        except ValueError:
+            raise Exception(f"Row not found: {rowa} in {rows} for {obj.query}")
+        print(f"track_view delete_row from {obj}: {row} {rows}")
+    insert_cb = lambda x: print(f"track_view insert_cb {x} {rows}") or rows.append(tuple([x[col] for col in obj.columns]))
+    obj.insert_cbs.append(insert_cb)
+    update_cb = lambda old, new: print(f"track_view update_cb {old} {new}") or delete_row(old) or insert_cb(new)
+    obj.update_cbs.append(update_cb)
+    obj.delete_cbs.append(delete_row)
+    reset_cb = lambda: rows.clear() or rows.extend(obj.fetchall())
+    obj.reset_cbs.append(reset_cb)
+    return rows, [row for row in rows], insert_cb, update_cb, delete_row, reset_cb
+
+def track_views():
+    views = []
+    for obj in gc.get_objects():
+        if isinstance(obj, View) and not isinstance(obj, Sort):
+            views.append([obj, *track_view(obj)])
+    def end_track(query):
+        print("end_track", [[type(view), rows] for view, rows, before, insert_cb, update_cb, delete_cb, reset_cb in views])
+        for view, rows, before, insert_cb, update_cb, delete_cb, reset_cb in views:
+            view.insert_cbs.remove(insert_cb)
+            view.update_cbs.remove(update_cb)
+            view.delete_cbs.remove(delete_cb)
+            view.reset_cbs.remove(reset_cb)
+            rows2 = view.fetchall()
+            rows2.sort(key=hash)
+            rows.sort(key=hash)
+            if rows != rows2:
+                raise Exception(f"Views don't match for {type(view)} defined by {view.query}: {query}:\ncomputed: {rows}\nactual: {rows2}\nbefore: {before}")
+    return end_track
 
 class Database:
     def __init__(self, db_name: str, use_triggers=True):
@@ -1539,7 +1654,10 @@ class Database:
         with self.lock:
             cursor = self.get_cursor()
             try:
-                execute(cursor, f"INSERT {'OR IGNORE' if ignore else ''} INTO {table_name} ({', '.join(values.keys())}) VALUES ({', '.join(['?' for _ in values])})", tuple(values.values()))
+                if DEBUG_VIEWS:
+                    views = track_views()
+                query = f"INSERT {'OR IGNORE' if ignore else ''} INTO {table_name} ({', '.join(values.keys())}) VALUES ({', '.join(['?' for _ in values])})"
+                execute(cursor, query, tuple(values.values()))
                 if ignore and cursor.rowcount == 0:
                     return
                 if self.use_triggers:
@@ -1551,12 +1669,16 @@ class Database:
                     for cb in self.insert_cbs:
                         cb(table_name, data)
                 self.conn.commit()
+                if DEBUG_VIEWS:
+                    views(query)
             except Exception as e:
                 self.conn.rollback()
                 raise e
 
     def delete(self, table_name: str, **values):
         with self.lock:
+            if DEBUG_VIEWS:
+                views = track_views()
             cursor = self.get_cursor()
             # get deleted rows
             where_clause, remaining_values = create_where_null_clause(values.keys(), values.values())
@@ -1573,10 +1695,13 @@ class Database:
                         for cb in self.delete_cbs:
                             cb(table_name, row)
             self.conn.commit()
+            if DEBUG_VIEWS:
+                views(f"DELETE FROM {table_name} {where_clause}")
 
     def update(self, table_name: str, where: dict, **values):
         with self.lock:
-        # need old and new data
+            if DEBUG_VIEWS:
+                views = track_views()
             cursor = self.get_cursor()
             try:
                 where_clause, remaining_values = create_where_null_clause(where.keys(), where.values())
@@ -1600,6 +1725,8 @@ class Database:
                         for cb in self.update_cbs:
                             cb(table_name, old, new)
                 self.conn.commit()
+                if DEBUG_VIEWS:
+                    views(f"UPDATE {table_name} {set_clause} {where_clause}")
             except Exception as e:
                 self.conn.rollback()
                 raise e

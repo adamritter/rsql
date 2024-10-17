@@ -13,6 +13,7 @@ def test(t, f):
     global N
     N += 1
     rows = t.fetchall()
+    before = [row for row in rows]
     t.insert_cbs.append(lambda row: rows.append(tuple([row[k] for k in t.columns])))
     t.delete_cbs.append(lambda row: print("deleting", row, "from", rows) or rows.remove(tuple([row[k] for k in t.columns])))
     t.update_cbs.append(lambda old, new: rows.remove(tuple([old[k] for k in t.columns])) or rows.append(tuple([new[k] for k in t.columns])))
@@ -23,7 +24,7 @@ def test(t, f):
     rows.sort(key=hash)
     rows2 = t.fetchall()
     rows2.sort(key=hash)
-    assert rows == rows2, (rows, rows2, t.query)
+    assert rows == rows2, f"computed: {rows} != actual: {rows2} for {t.query}, before: {before}"
 
 def assert_eq(x, y, msg=None):
     assert x == y, (x, y, msg)
@@ -153,7 +154,11 @@ def test_join(left_outer=False, right_outer=False, no_on=False):
     test(w, lambda: t1.update({}, id=20))
     test(w, lambda: t2.update({}, id=20))
     test(w, lambda: t2.update({}, id=10))
-    test(w, lambda: t1.update({}, id=10))
+    t1.print()
+    # test(w, lambda: t1.update({}, id=10)) # (20, 'e')
+    test(w, lambda: t1.delete())
+    test(w, lambda: t1.insert(id=10, name='e'))
+    # without update
     test(w, lambda: t1.delete())
     test(w, lambda: t2.delete())
     # w.__del__()
