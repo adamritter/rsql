@@ -164,7 +164,6 @@ def ulli(t, cb, header=None, id=None):
     return r
 
 def value(v, tab_id0=None):
-    print(type(v))
     if isinstance(v, rsql.View):
         return table(v, tab_id0=tab_id0)
     id = nextid()
