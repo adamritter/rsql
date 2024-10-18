@@ -286,6 +286,12 @@ class View:
     def tohtml(self, valueobj):
         return self.db.tohtml(valueobj)
     
+    def __html__(self):
+        r = self.tohtml(self)
+        while hasattr(r, "__html__"):
+            r = r.__html__()
+        return r
+    
     def name_or_query(self):
         return self.name if hasattr(self, 'name') else self.query
         

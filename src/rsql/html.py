@@ -106,13 +106,21 @@ def nextid():
     lastid += 1
     return f"e{lastid}"
 
-def table(t, cb, header=None, id=None):
+def table(t, cb=None, header=None, id=None, tab_id0=None):
     if not id:
         id = nextid()
+    if not cb:
+        cb = lambda x: tuple([Td(x[col]) for col in t.columns])
+    if not header:
+        header = tuple([Th(col) for col in t.columns])
     r = fasttag.Table(
         *([Thead(header)] if header else []),
         Tbody(*[Tr(cb(row), id=f"e{abs(row.__hash__())}") for row in t], id=id))
-    tid = tab_id.get()
+    if tab_id0:
+        tid = tab_id0.get()
+    else:
+        tid = tab_id.get()
+    print(f"table, tab_id0={tab_id0}, tid={tid}")
     objects_per_tab[tid].append(t)
     if type(t) == rsql.Sort:
         destructors_per_tab[tid].append(
@@ -156,6 +164,9 @@ def ulli(t, cb, header=None, id=None):
     return r
 
 def value(v, tab_id0=None):
+    print(type(v))
+    if isinstance(v, rsql.View):
+        return table(v, tab_id0=tab_id0)
     id = nextid()
     if tab_id0:
         tid = tab_id0.get()
