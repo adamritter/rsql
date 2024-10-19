@@ -1,5 +1,3 @@
-import sys
-sys.path.append("src")
 from rsql.html import *
 
 db = rsql.Database("dbs/tictactoe_simple.db")
@@ -67,4 +65,4 @@ def post(col:int, row:int):
         steps.insert(step=step_count.value + 1, col=col, row=row, o=(step_count.value % 2))
 
 if __name__ == '__main__':
-    rsql_html_serve()
+    serve()

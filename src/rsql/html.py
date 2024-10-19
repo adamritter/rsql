@@ -377,10 +377,6 @@ def simple_load_test_thread(url='/'):
             print(f"Error calling server: {e}")
             raise e
 
-def rsql_html_serve(appname=None, app='app', port=5001, reload=True, log_level="info", host="0.0.0.0",
-                    timeout_keep_alive=600, print_memory=False, simple_load_test=None, **argv):
-    return serve(appname, app, port, reload, log_level, host, timeout_keep_alive, print_memory, simple_load_test, **argv)
-
 # Use log_level="critical" to suppress logging
 def serve(appname=None, app='app', port=5001, reload=True, log_level="info", host="0.0.0.0",
                     timeout_keep_alive=600, print_memory=False, simple_load_test=None, **argv):
@@ -418,3 +414,8 @@ def serve(appname=None, app='app', port=5001, reload=True, log_level="info", hos
         **argv
     )
     print("rsql_html_serve server stopped")
+
+
+def rsql_html_serve(appname=None, app='app', port=5001, reload=True, log_level="info", host="0.0.0.0",
+                    timeout_keep_alive=600, print_memory=False, simple_load_test=None, **argv):
+    return serve(appname, app, port, reload, log_level, host, timeout_keep_alive, print_memory, simple_load_test, **argv)
