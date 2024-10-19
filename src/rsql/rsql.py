@@ -1,3 +1,48 @@
+"""
+RSQL: Reactive SQL Wrapper
+
+This module provides a reactive SQL wrapper for light web development.
+It tracks and propagates changes from database tables to views.
+
+Key features:
+- Live SQL updates
+- Reactive views
+- Support for SQLite database operations
+- Custom data types and constraints
+
+Usage:
+    import rsql
+
+    # Create a database
+    db = rsql.Database('example.db')
+
+    # Define tables and views
+    # ...
+
+Classes:
+    - Database
+    - View
+    - Table
+    - SQLUnion
+    - EditableRowItem
+    - URLM
+    ...
+
+Functions:
+    - execute
+    - create_where_null_clause
+    - sqlrepr
+    - track_views
+    ...
+
+Constants:
+    - DEBUG
+    - DEBUG_VIEWS
+    - AUTOINCREMENT
+    - CHECK_SAME_THREAD
+    ...
+"""
+
 # Live SQL wrapper
 # The main goal of the live sql wrapper is to track and propagate changes from database tables to views.
 # It's meant for light web development
@@ -41,14 +86,45 @@ def weak_cb(cb):
 
 
 class URLM:
+    """
+    URLM class represents a URL with a method.
+
+    Attributes:
+        url (str): The URL.
+        method (str): The HTTP method.
+    """
     def __init__(self, url, method):
+        """
+        Initialize the URLM object.
+
+        Args:
+            url (str): The URL.
+            method (str): The HTTP method.
+        """
         self.url = url
         self.__method__ = method
     
     def __str__(self):
+        """
+        Return the string representation of the URLM object.
+
+        Returns:
+            str: The URL.
+        """
         return self.url
 
 def execute(cursor, query, params=None):
+    """
+    Execute a SQL query on the database.
+
+    Args:
+        cursor: The cursor object.
+        query (str): The SQL query to execute.
+        params (tuple, optional): Parameters for the query.
+
+    Returns:
+        cursor: The cursor object after executing the query.
+    """
     if DEBUG:
         if params:
             print(query, params)
@@ -64,6 +140,16 @@ def execute(cursor, query, params=None):
 
     
 def create_where_null_clause(columns, values):
+    """
+    Create a WHERE clause for NULL values.
+
+    Args:
+        columns (list): List of column names.
+        values (list): List of corresponding values.
+
+    Returns:
+        tuple: A tuple containing the WHERE clause and the remaining values.
+    """
     where_conditions = []
     remaining_values = []
     for col, val in zip(columns, values):
@@ -264,7 +350,28 @@ class Row:
         return URLM(f"/{self.__table__.name}/{self.id}?{urlencode(values)}", "patch")
 
 class View:
+    """
+    View class represents a view on a database table.
+
+    Attributes:
+        db: The database object.
+        row_table: The table object.
+        update_cbs: List of callbacks for update events.
+        insert_cbs: List of callbacks for insert events.
+        delete_cbs: List of callbacks for delete events.
+        reset_cbs: List of callbacks for reset events.
+        unique_keys: List of unique keys for the table.
+        is_bool: Dictionary indicating if a column is a boolean.
+        row_table: The table object.
+    """
     def __init__(self, db, row_table=None):
+        """
+        Initialize the View object.
+
+        Args:
+            db: The database object.
+            row_table: The table object.
+        """
         self.db = db        
         self.update_cbs = []
         self.insert_cbs = []
@@ -287,20 +394,38 @@ class View:
         return self.db.tohtml(valueobj)
     
     def __html__(self):
+        """
+        Return the HTML representation of the view in an HTML table.
+
+        Returns:
+            str: The HTML representation of the view in an HTML table.
+        """
         r = self.tohtml(self)
         while hasattr(r, "__html__"):
             r = r.__html__()
         return r
     
     def name_or_query(self):
+        """
+        Return the name of the view if it has one, otherwise return the query.
+
+        Returns:
+            str: The name or query of the view.
+        """
         return self.name if hasattr(self, 'name') else self.query
         
     def listen(self):
+        """
+        Listen for and print insert, update, and delete events on the view.
+        """
         self.insert_cbs.append(lambda values: print(f"Inserted {values} into {self.name_or_query()}"))
         self.update_cbs.append(lambda old, new: print(f"Updated {old} to {new} in {self.name_or_query()}"))
         self.delete_cbs.append(lambda values: print(f"Deleted {values} from {self.name_or_query()}"))
     
     def unlisten(self):
+        """
+        Stop listening for insert, update, and delete events on the view.
+        """
         self.insert_cbs.pop()
         self.update_cbs.pop()
         self.delete_cbs.pop()
@@ -318,6 +443,12 @@ class View:
         return {col: int(v) if isinstance(v, bool) else 0 if v=="False" and self.is_bool_col(col) else 1 if v=="True" and self.is_bool_col(col) else v for col, v in values.items()}
 
     def __iter__(self):
+        """
+        Iterate over the rows in the view.
+
+        Returns:
+            iterator: An iterator over the rows in the view.
+        """
         return map(
             lambda values: Row(
                 {col: val for col, val in zip(self.columns, self.maybe_to_bool(values))},
@@ -327,9 +458,24 @@ class View:
         )
 
     def fetchall(self):
+        """
+        Fetch all rows from the view.
+
+        Returns:
+            list: A list of rows from the view.
+        """
         return self.db.execute(self.query)
     
     def fetchone(self, **values):
+        """
+        Fetch one row from the view based on the given values.
+
+        Args:
+            values: Dictionary of column values to filter the row.
+
+        Returns:
+            Row: The row matching the given values, or None if no row is found.
+        """
         query = f"SELECT * FROM ({self.query}) {'WHERE' if values else ''} {', '.join([f'{k}=?' for k in values])}"
         row = self.db.fetchone(query, tuple(values.values()))
         return Row({col: val for col, val in zip(self.columns, self.maybe_to_bool(row))}, self) if row else None
@@ -365,15 +511,33 @@ class View:
             self.parent.reset_cbs.remove(self.reset_cbs_ref)
     
     def select(self, **colexprs):
+        """
+        Create a new Select object with the current view as the parent.
+
+        Args:
+            colexprs: Dictionary of column expressions.
+
+        Returns:
+            Select: A new Select object.
+        """
         return Select(self, **colexprs)
 
     def where(self, main=None, **where):
+        """
+        Create a new WHERE clause with main and additional column conditions.
+        """
         return Where(self, main, **where)
     
     def union(self, parent2):
+        """
+        Create a UNION query with the current view and another view.
+        """
         return SQLUnion(self, parent2)
     
     def union_all(self, parent2):
+        """
+        Create a UNION ALL query with the current view and another view.
+        """
         return UnionAll(self, parent2)
     
     def join(self, parent2, left_outer=False, right_outer=False, left_name='a', right_name='b', **on):
@@ -1558,6 +1722,18 @@ def hash(x):
 
 
 def track_view(obj):
+    """
+    Track a view and its associated rows.
+
+    This function creates a list of rows from the view and adds callbacks
+    to track changes to the view.
+
+    Args:
+        obj (View): The view object to track.
+
+    Returns:
+        tuple: A tuple containing the rows, a list of rows, and the insert and update callbacks.
+    """
     rows = obj.fetchall()
     def delete_row(row):
         try:
@@ -1576,6 +1752,16 @@ def track_view(obj):
     return rows, [row for row in rows], insert_cb, update_cb, delete_row, reset_cb
 
 def track_views():
+    """
+    Track views and their associated rows.
+
+    This function iterates over all objects in the current Python environment,
+    checks if they are instances of the View class, and if so, tracks them.
+    It also tracks the rows, callbacks, and other related information for each view.
+
+    Returns:    
+        end_track: A function to end the tracking process and validate views.
+    """
     views = []
     for obj in gc.get_objects():
         if isinstance(obj, View) and not isinstance(obj, Sort):
@@ -1595,7 +1781,35 @@ def track_views():
     return end_track
 
 class Database:
+    """
+    Represents a SQLite database with reactive capabilities.
+
+    This class provides methods for creating tables, executing queries,
+    and managing database operations with reactive updates.
+
+    Attributes:
+        conn (sqlite3.Connection): The database connection.
+        update_cbs (list): Callbacks for update operations.
+        insert_cbs (list): Callbacks for insert operations.
+        delete_cbs (list): Callbacks for delete operations.
+
+    Methods:
+        execute(query, params=None): Execute a SQL query.
+        create_table(name, **columns): Create a new table in the database.
+        insert(table, ignore=False, **values): Insert a new row into a table.
+        update(table, where, **values): Update rows in a table.
+        delete(table, **where): Delete rows from a table.
+        ...
+    """
+
     def __init__(self, db_name: str, use_triggers=True):
+        """
+        Initialize a new Database instance.
+
+        Args:
+            db_name (str): The name of the SQLite database file.
+            use_triggers (bool): Whether to use triggers for change tracking.
+        """
         self.use_triggers = use_triggers
         self.db_name = db_name
         self.conn = sqlite3.connect(db_name, check_same_thread=CHECK_SAME_THREAD)
@@ -1616,12 +1830,36 @@ class Database:
         self.get_cursor()
 
     def get_cursor(self):
+        """
+        Get the database cursor.
+
+        Returns:
+            sqlite3.Cursor: The database cursor.
+        """
         return self.cursor
 
     def tables(self):
+        """
+        Get a list of all tables in the database.
+
+        Returns:
+            list: A list of table names.
+        """
         return [row[0] for row in self.execute("SELECT name FROM sqlite_master WHERE type='table'")]
 
     def table(self, table_name: str, id=AUTOINCREMENT, temp=False, **columns: Union[str, Type]) -> Table:
+        """
+        Create or get a table in the database.
+
+        Args:
+            table_name (str): The name of the table.
+            id: The primary key configuration.
+            temp (bool): Whether the table is temporary.
+            **columns: Column definitions.
+
+        Returns:
+            Table: The created or existing table object.
+        """
         if table_name not in self.tables:
             table = Table(self, table_name, id=id, temp=temp, **columns)
             self.tables[table_name] = table
@@ -1638,6 +1876,12 @@ class Database:
         return self.tables[table_name]
 
     def respond_to_changes(self, table_name):
+        """
+        Respond to changes in the specified table or all tables.
+
+        Args:
+            table_name (str or None): The name of the table to respond to changes, or None for all tables.
+        """
         if table_name == None:
             for table_name in self.tables.keys():
                 self.respond_to_changes(table_name)
@@ -1657,6 +1901,14 @@ class Database:
             self.conn.execute(f"DELETE FROM {table_name}_rows;")
     
     def insert(self, table_name: str, ignore=False, **values):
+        """
+        Insert a new row into the specified table.
+
+        Args:
+            table_name (str): The name of the table.
+            ignore (bool): Whether to ignore conflicts.
+            **values: The values to insert.
+        """
         with self.lock:
             cursor = self.get_cursor()
             try:
@@ -1682,6 +1934,13 @@ class Database:
                 raise e
 
     def delete(self, table_name: str, **values):
+        """
+        Delete rows from the specified table.
+
+        Args:
+            table_name (str): The name of the table.
+            **values: The conditions for deletion.
+        """
         with self.lock:
             if DEBUG_VIEWS:
                 views = track_views()
@@ -1705,6 +1964,14 @@ class Database:
                 views(f"DELETE FROM {table_name} {where_clause}")
 
     def update(self, table_name: str, where: dict, **values):
+        """
+        Update rows in the specified table.
+
+        Args:
+            table_name (str): The name of the table.
+            where (dict): The conditions for updating.
+            **values: The new values to set.
+        """
         with self.lock:
             if DEBUG_VIEWS:
                 views = track_views()
@@ -1738,6 +2005,16 @@ class Database:
                 raise e
     
     def execute(self, query, values=None):
+        """
+        Execute a SQL query on the database.
+
+        Args:
+            query (str): The SQL query to execute.
+            values (tuple, optional): Parameters for the query.
+
+        Returns:
+            list: The result of the query execution.
+        """
         with self.lock:
             if DEBUG:
                 print("db.execute", query)
@@ -1751,7 +2028,18 @@ class Database:
             except Exception as e:
                 self.conn.rollback()
                 raise Exception(f"Error executing query: {query}" + (f" with values: {values}" if values else "")) from e
+
     def fetchone(self, query, values=None):
+        """
+        Execute a SQL query and fetch one result.
+
+        Args:
+            query (str): The SQL query to execute.
+            values (tuple, optional): Parameters for the query.
+
+        Returns:
+            tuple: The first row of the query result.
+        """
         with self.lock:
             if DEBUG:
                 if values:
@@ -1770,6 +2058,16 @@ class Database:
                 raise Exception(f"Error executing query: {query}" + (f" with values: {values}" if values else "")) from e
     
     def fetchall(self, query, values=None):
+        """
+        Execute a SQL query and fetch all results.
+
+        Args:
+            query (str): The SQL query to execute.
+            values (tuple, optional): Parameters for the query.
+
+        Returns:
+            list: All rows of the query result.
+        """
         with self.lock:
             if DEBUG:
                 print("db.fetchall", query)
@@ -1785,6 +2083,9 @@ class Database:
                 raise Exception(f"Error executing query: {query}" + (f" with values: {values}" if values else "")) from e
 
     def __del__(self):
+        """
+        Close the database connection when the object is deleted.
+        """
         self.conn.close()
 
 def sql_cmp(a, b):
