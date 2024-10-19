@@ -21,16 +21,15 @@
 git clone https://github.com/adamritter/rsql.git
 ```
 
-Install Python 3.12
-
-## Install dependencies:
+## Install package:
 ```
-pip install -r requirements.txt
+cd rsql
+pip install -e .
 ```
 
 ## Run examples:
 ```
-python examples/qt_todo.py
+python examples/todo.py
 ```
 
 ## Run tests
