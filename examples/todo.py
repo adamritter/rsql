@@ -2,11 +2,12 @@ from rsql.html import *
 db = Database("dbs/todo.db")
 todo = db.table("todo", id=rsql.AUTOINCREMENT, task=str, done=bool)
 app, rtx = rsql_html_app(pico=True, db=db)
+incomplete_count = todo.where(done=False).count()
+completed_count = todo.where(done=True).count()
 
 # http://localhost:5001
 @rtx('/')
 def get():
-    incomplete_count = todo.where(done=False).count()
     return Div(
         H1("TODO", id="title"),
         Form(
@@ -21,8 +22,8 @@ def get():
                         Td(Input(type="checkbox", checked=row.done, onchange=row.update_urlm(done=not row.done))),
                         Td(Button("x", onclick=lambda: row.delete()))),
             header=(Th("Task"), Th("Done"), Th("Delete")), id="todos"),
-        show_if(todo.where(done=True).count(), Button("Clear completed", onclick=todo.delete_urlm(done=True))),
-        Span(value(incomplete_count.map(lambda x: "1 item left" if x == 1 else f"{x} items left"))),
+        show_if(completed_count, Button("Clear completed", onclick=todo.delete_urlm(done=True))),
+        Span(incomplete_count.map(lambda x: "1 item left" if x == 1 else f"{x} items left")),
     )
 
 def add(task:str):
