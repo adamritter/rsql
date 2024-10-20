@@ -11,7 +11,7 @@ from collections import defaultdict
 import contextvars
 import rsql
 from functools import lru_cache as memoize
-HTMXWS = True
+HTMXWS = True  # Starlette does not support HTMXWS yet
 
 tab_id = contextvars.ContextVar('tab_id', default=0)
 accept_port = contextvars.ContextVar('accept_port', default=None)
@@ -120,7 +120,6 @@ def table(t, cb=None, header=None, id=None, tab_id0=None):
         tid = tab_id0.get()
     else:
         tid = tab_id.get()
-    print(f"table, tab_id0={tab_id0}, tid={tid}")
     objects_per_tab[tid].append(t)
     if type(t) == rsql.Sort:
         destructors_per_tab[tid].append(
@@ -287,11 +286,42 @@ class ServerTimingMiddleware:
             await send(message)
         await self.app(scope, receive, _send)
 
+def response(data):
+    return HTMLResponse('')
+    r = []
+    headers = {}
+    for s in data:
+        if isinstance(s, HttpHeader):
+            headers[s.k] = s.v
+        elif isinstance(s, str):
+            r.append(s)
+        else:
+            r.append(str(s))
+    return HTMLResponse(''.join(r), headers=headers)
+
+def starlette_router(routes):
+    def decorator(path):
+        def decorator2(func):
+            routes.append(Route(path, endpoint=lambda request: response(func(None, None))))
+        return decorator2
+    return decorator
+
+def simple2(request):
+    return HTMLResponse('simple2')
+
 import asyncio
-def rsql_html_app(live=True, debug=True, db=None, hdrs=static_hdrs, default_hdrs=False, before=None, pico=False, **kwargs):
+def rsql_html_app(live=True, debug=True, db=None, hdrs=static_hdrs, default_hdrs=False, before=None,
+                   pico=False, starlette=False, **kwargs):
+    global HTMXWS
     if pico:
         hdrs.append(picocss)
-    app,rt = fast_app(live=live, debug=debug, hdrs=hdrs, default_hdrs=default_hdrs, before=before, middleware=[Middleware(ServerTimingMiddleware)], **kwargs)
+    if starlette:
+        HTMXWS = False
+        routes = [Route('/simple2', endpoint=simple2)]
+        app = lambda: Starlette(debug=debug, middleware=[Middleware(ServerTimingMiddleware)], routes=routes, **kwargs)
+        rt = starlette_router(routes)
+    else:
+        app,rt = fast_app(live=live, debug=debug, hdrs=hdrs, default_hdrs=default_hdrs, before=before, middleware=[Middleware(ServerTimingMiddleware)], **kwargs)
     rtx = rt_with_sqlx(rt, app)
 
     if db:
@@ -401,7 +431,8 @@ def serve(appname=None, app='app', port=5001, reload=True, log_level="info", hos
         threading.Thread(target=print_memory_thread, daemon=True).start()
     if simple_load_test:
         threading.Thread(target=simple_load_test_thread, args=(simple_load_test,), daemon=True).start()
-
+    if isfunction(app):
+        app = app()
     uvicorn.run(
         f'{appname}:{app}',
         host=host,
