@@ -110,7 +110,9 @@ def nextid():
     lastid += 1
     return f"e{lastid}"
 
-def table(t, cb=None, header=None, id=None, tab_id0=None, infinite=False, next_button=False):
+def table(t, cb=None, header=None, id=None, tab_id0=None, infinite=False, next_button=False, limit=None, order_by=None):
+    if ((infinite or next_button) or limit or order_by) and type(t) != rsql.Sort:
+        t = t.sort(limit=(limit or 50), order_by=order_by)
     if not id:
         id = nextid()
     if not cb:
@@ -141,7 +143,7 @@ def table(t, cb=None, header=None, id=None, tab_id0=None, infinite=False, next_b
             r = r + Button("Next", onclick=lambda: t.set_limit(t.limit+50))
         if infinite:
             load_more = post_method_creator(global_app)(lambda: t.set_limit(t.limit+50))
-            r = r + Script(f"var {id}_height = document.getElementById('{id}').clientHeight/2; var {id}_loading=false; document.addEventListener('scroll', function(evt) {{ if (!{id}_loading) if(window.scrollY+window.innerHeight > document.getElementById('{id}').clientHeight + document.getElementById('{id}').scrollTop - {id}_height) {{ console.log('load more'); {id}_loading = true; htmx.ajax('POST', '{load_more}', {{target: '#{id}'}}).then(function(data) {{console.log('loaded', data); {id}_loading = false;}});}};}})")
+            r = r + Script(f"var {id}_height = document.getElementById('{id}').clientHeight/2; var {id}_loading=false; document.addEventListener('scroll', function(evt) {{ if (!{id}_loading) if(window.scrollY+window.innerHeight > document.getElementById('{id}').clientHeight + document.getElementById('{id}').scrollTop - {id}_height) {{ {id}_loading = true; htmx.ajax('POST', '{load_more}', {{target: '#{id}'}}).then(function(data) {{ {id}_loading = false;}});}};}})")
     else:
         destructors_per_tab[tid].append(
             t.on_insert(lambda row: send_event(tid, Template(Tbody(Tr(cb(row), id=f"e{abs(row.__hash__())}"), hx_swap_oob=f"beforeend:#{id}")))))

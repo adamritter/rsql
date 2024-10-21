@@ -9,8 +9,7 @@ if square.count().value < 1000:
 
 @rtx('/')
 def get():
-    return Div(H1("Infinite Scroll"),
-               table(square.sort(limit=50), infinite=True))
+    return Div(H1("Infinite Scroll"), table(square, infinite=True))
 
 if __name__ == "__main__":
     serve()
