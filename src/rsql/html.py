@@ -27,9 +27,11 @@ destructors_per_tab = defaultdict(list)
 sends = {}
 import asyncio
 def send_event(target_tab_id, event):
+    # print("send_event", target_tab_id, tab_id.get(), event, sends)
     if target_tab_id == tab_id.get():
         queues[target_tab_id].put(event)
     elif target_tab_id in sends:
+        # print("sending to ws", target_tab_id)
         asyncio.run(sends[target_tab_id](event))
     else:
         queues[target_tab_id].put(event)
@@ -65,6 +67,8 @@ def with_sqlx(f, app=None):
         global global_app
         global_app = app
         result = f(*args)
+        if isinstance(result, rsql.Value):
+            result = value(result)
         if isinstance(result, tuple):
             t = []
             for r in result:
@@ -131,6 +135,9 @@ def table(t, cb=None, header=None, id=None, tab_id0=None):
                                                                      hx_swap_oob=f"outerHTML: #{id} > :nth-child({index+1})")))))
         destructors_per_tab[tid].append(
             t.on_delete(lambda index, row: send_event(tid, Template(hx_swap_oob=f"delete: #{id} > :nth-child({index+1})"))))
+        destructors_per_tab[tid].append(
+            t.on_reset(lambda: send_event(tid, Template(Tbody(*[Tr(cb(row), id=f"e{abs(row.__hash__())}") for row in t], hx_swap_oob=f"innerHTML: #{id}")))))
+        print("on_reset being called", len(t.reset_cbs))
     else:
         destructors_per_tab[tid].append(
             t.on_insert(lambda row: send_event(tid, Template(Tbody(Tr(cb(row), id=f"e{abs(row.__hash__())}"), hx_swap_oob=f"beforeend:#{id}")))))
@@ -380,15 +387,13 @@ def simple_load_test_thread(url='/'):
 # Use log_level="critical" to suppress logging
 def serve(appname=None, app='app', port=5001, reload=True, log_level="info", host="0.0.0.0",
                     timeout_keep_alive=600, print_memory=False, simple_load_test=None, **argv):
-    print("rsql_html:serve starting server on http://" + host + ":" + str(port))
+    print("rsql_html:serve starting server on http://" + host + ":" + str(port), appname, app)
     print("Reload is set to:", reload)
     
     # __file__ is the path to the current file
-    print("Current file path:", __file__)
     bk = inspect.currentframe().f_back
     glb = bk.f_globals
     code = bk.f_code
-    appname = None
 
     if not appname:
             if glb.get('__name__')=='__main__': appname = Path(glb.get('__file__', '')).stem
@@ -401,6 +406,8 @@ def serve(appname=None, app='app', port=5001, reload=True, log_level="info", hos
         threading.Thread(target=print_memory_thread, daemon=True).start()
     if simple_load_test:
         threading.Thread(target=simple_load_test_thread, args=(simple_load_test,), daemon=True).start()
+    
+    print(f"rsql_html: serve starting server on http://{host}:{port} for {appname}:{app}")
 
     uvicorn.run(
         f'{appname}:{app}',

@@ -2136,6 +2136,7 @@ class Sort(View):
         if reset:
             self.limit = limit
             self.reset()
+            print("reset", self.limit, self.offset, "calling", len(self.reset_cbs), "callbacks")
             for cb in self.reset_cbs:
                 cb()
         else:
