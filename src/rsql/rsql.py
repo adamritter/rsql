@@ -2130,7 +2130,7 @@ class Sort(View):
         for cb in self.reset_cbs:
             cb()    
 
-    def set_limit(self, limit, reset=True):
+    def set_limit(self, limit, reset=False):
         if self.limit == limit:
             return
         if reset:
@@ -2146,6 +2146,7 @@ class Sort(View):
                     for cb in self.delete_cbs:
                         cb(i, self.sorted_results[i])
             else:
+                old_limit = self.limit
                 # Fetch new results
                 order_clause = f"ORDER BY {', '.join(self.order_by)}"
                 limit_clause = f"LIMIT {limit - self.limit}" if self.limit is not None else ""
@@ -2158,7 +2159,7 @@ class Sort(View):
                 limit_clause = f"LIMIT {self.limit}" if self.limit is not None else ""
                 offset_clause = f"OFFSET {self.offset}" if self.offset is not None else ""
                 self.query = f"SELECT * FROM ({self.parent.query}) {order_clause} {limit_clause} {offset_clause}"
-                for i in range(limit, len(self.sorted_results)):
+                for i in range(old_limit, len(self.sorted_results)):
                     for cb in self.insert_cbs:
                         cb(i, dict(zip(self.parent.columns, self.sorted_results[i])))
 
