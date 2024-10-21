@@ -7,17 +7,10 @@ if square.count().value < 1000:
     for x in range(1000):
         square.insert(id=x, y=x*x)
 
-t = square.sort(limit=50)
 @rtx('/')
 def get():
     return Div(H1("Infinite Scroll"),
-               table(t),
-               Button("Next", hx_post="/next")), t.set_limit(100)
-
-@rtx('/next')
-def post():
-    print("len(t.reset_cbs)", len(t.reset_cbs))
-    t.set_limit(t.limit+50)
+               table(square.sort(limit=50), infinite=True))
 
 if __name__ == "__main__":
     serve()

@@ -110,7 +110,7 @@ def nextid():
     lastid += 1
     return f"e{lastid}"
 
-def table(t, cb=None, header=None, id=None, tab_id0=None):
+def table(t, cb=None, header=None, id=None, tab_id0=None, infinite=False, next_button=False):
     if not id:
         id = nextid()
     if not cb:
@@ -137,7 +137,11 @@ def table(t, cb=None, header=None, id=None, tab_id0=None):
             t.on_delete(lambda index, row: send_event(tid, Template(hx_swap_oob=f"delete: #{id} > :nth-child({index+1})"))))
         destructors_per_tab[tid].append(
             t.on_reset(lambda: send_event(tid, Template(Tbody(*[Tr(cb(row), id=f"e{abs(row.__hash__())}") for row in t], hx_swap_oob=f"innerHTML: #{id}")))))
-        print("on_reset being called", len(t.reset_cbs))
+        if next_button:
+            r = r + Button("Next", onclick=lambda: t.set_limit(t.limit+50))
+        if infinite:
+            load_more = post_method_creator(global_app)(lambda: t.set_limit(t.limit+50))
+            r = r + Script(f"var {id}_height = document.getElementById('{id}').clientHeight/2; var {id}_loading=false; document.addEventListener('scroll', function(evt) {{ if (!{id}_loading) if(window.scrollY+window.innerHeight > document.getElementById('{id}').clientHeight + document.getElementById('{id}').scrollTop - {id}_height) {{ console.log('load more'); {id}_loading = true; htmx.ajax('POST', '{load_more}', {{target: '#{id}'}}).then(function(data) {{console.log('loaded', data); {id}_loading = false;}});}};}})")
     else:
         destructors_per_tab[tid].append(
             t.on_insert(lambda row: send_event(tid, Template(Tbody(Tr(cb(row), id=f"e{abs(row.__hash__())}"), hx_swap_oob=f"beforeend:#{id}")))))
@@ -145,6 +149,8 @@ def table(t, cb=None, header=None, id=None, tab_id0=None):
             t.on_delete(lambda row: send_event(tid, Template(Tr(id=f"e{abs(row.__hash__())}", hx_swap_oob="delete")))))
         destructors_per_tab[tid].append(
             t.on_update(lambda old, new: send_event(tid, Template(Tr(cb(new),id=f"e{abs(new.__hash__())}", hx_swap_oob=f"outerHTML: #e{abs(old.__hash__())}")))))
+        destructors_per_tab[tid].append(
+            t.on_reset(lambda: send_event(tid, Template(Tbody(*[Tr(cb(row), id=f"e{abs(row.__hash__())}") for row in t], hx_swap_oob=f"innerHTML: #{id}")))))
     return r
 
 def ulli(t, cb, header=None, id=None):
@@ -235,6 +241,7 @@ def post_method_creator(app):
         if name == "<lambda>":
             name = "lambda"
         url = f"/app/{name}/{random_string(10)}"
+        print("post_method_creator registering", url)
         app.post(url)(ws)
         rr=None
         for r in app.routes:
