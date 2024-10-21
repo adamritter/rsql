@@ -126,7 +126,6 @@ def table(t, cb=None, header=None, id=None, tab_id0=None, infinite=False, next_b
         tid = tab_id0.get()
     else:
         tid = tab_id.get()
-    print(f"table, tab_id0={tab_id0}, tid={tid}")
     objects_per_tab[tid].append(t)
     if type(t) == rsql.Sort:
         destructors_per_tab[tid].append(
@@ -243,7 +242,6 @@ def post_method_creator(app):
         if name == "<lambda>":
             name = "lambda"
         url = f"/app/{name}/{random_string(10)}"
-        print("post_method_creator registering", url)
         app.post(url)(ws)
         rr=None
         for r in app.routes:
@@ -431,3 +429,35 @@ def serve(appname=None, app='app', port=5001, reload=True, log_level="info", hos
     )
     print("rsql_html: serve server stopped")
 
+
+# Usage:
+#
+# if __name__ == "__main__":
+#     serve(print_memory=True, simple_load_test='/', log_level="critical")
+#     # serve(log_level="critical")
+# else: 
+#     print("imported, __name__", __name__)
+#     if __name__ != "__mp_main__":
+#        profile_server()
+def profile_server():
+    print("profiling")
+    import cProfile
+    import cProfile, pstats, io
+    from pstats import SortKey
+    import atexit
+    pr = cProfile.Profile()
+    pr.enable()
+    # disable at exit
+    # sleep 10 seconds in another thread
+    import threading
+    def disable_profiling():
+        time.sleep(3)
+        print("profiling disabled")
+        pr.disable()
+        s = io.StringIO()
+        sortby = SortKey.CUMULATIVE
+        ps = pstats.Stats(pr, stream=s).sort_stats(sortby)
+        ps.print_stats()
+        print(s.getvalue())
+
+    threading.Thread(target=disable_profiling).start()
