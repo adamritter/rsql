@@ -1,6 +1,6 @@
 from rsql.html import *
 db = Database("dbs/infinite_scroll.db")
-square = db.table("square2", id="INTEGER PRIMARY KEY", y=int)
+square = db.table("square", id="INTEGER PRIMARY KEY", y=int)
 app, rtx = rsql_html_app(pico=True, db=db)
 if square.count().value < 1000:
     square.delete()

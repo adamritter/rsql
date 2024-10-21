@@ -13,6 +13,8 @@ import rsql
 from functools import lru_cache as memoize
 HTMXWS = True
 
+# TODO: fastapi support maybe, 5x faster than fasthtml
+
 tab_id = contextvars.ContextVar('tab_id', default=0)
 accept_port = contextvars.ContextVar('accept_port', default=None)
 last_tab_id = 1
