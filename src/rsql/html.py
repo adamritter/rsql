@@ -119,11 +119,25 @@ def table(t, cb=None, header=None, id=None, tab_id0=None, infinite=False, next_b
         id = nextid()
     if not cb:
         cb = lambda x: tuple([Td(x[col]) for col in t.columns])
-    if not header:
+    if header:
+        header = tuple([x if isinstance(x, fasttag.HTML) and x.tag == "th" else Th(x) for x in header])
+    else:
         header = tuple([Th(col) for col in t.columns])
+    
+    def maybetr(row, id=None, hx_swap_oob=None):
+        if isinstance(row, fasttag.HTML) and row.tag == "tr":
+            return fasttag.HTML(f"<tr{id and f' id=\"{id}\"' or ''}{hx_swap_oob and f' hx-swap-oob=\"{hx_swap_oob}\"' or ''}{str(row)[3:]}")
+        else:
+            return Tr(tds(cb(row)), id=id, hx_swap_oob=hx_swap_oob)
+    
+    def tds(row):
+        if isinstance(row, fasttag.HTML):
+            return row
+        else:
+            return tuple([x if isinstance(x, fasttag.HTML) and x.tag == "td" else Td(x) for x in row])
     r = fasttag.Table(
         *([Thead(header)] if header else []),
-        Tbody(*[Tr(cb(row), id=f"e{abs(row.__hash__())}") for row in t], id=id))
+        Tbody(*[maybetr(tds(cb(row)), id=f"e{abs(row.__hash__())}") for row in t], id=id))
     if tab_id0:
         tid = tab_id0.get()
     else:
@@ -131,15 +145,15 @@ def table(t, cb=None, header=None, id=None, tab_id0=None, infinite=False, next_b
     objects_per_tab[tid].append(t)
     if type(t) == rsql.Sort:
         destructors_per_tab[tid].append(
-            t.on_insert(lambda index, row: send_event(tid, Template(Tbody(Tr(cb(row), id=f"e{abs(row.__hash__())}"),
+            t.on_insert(lambda index, row: send_event(tid, Template(Tbody(Tr(tds(cb(row)), id=f"e{abs(row.__hash__())}"),
                                     hx_swap_oob=(f"afterend: #{id} > :nth-child({index})" if index else f"beforeend: #{id}"))))))
         destructors_per_tab[tid].append(
-            t.on_update(lambda index, old, new: send_event(tid, Template(Tr(cb(new),id=f"e{abs(new.__hash__())}", 
+            t.on_update(lambda index, old, new: send_event(tid, Template(Tr(tds(cb(new)),id=f"e{abs(new.__hash__())}", 
                                                                      hx_swap_oob=f"outerHTML: #{id} > :nth-child({index+1})")))))
         destructors_per_tab[tid].append(
             t.on_delete(lambda index, row: send_event(tid, Template(hx_swap_oob=f"delete: #{id} > :nth-child({index+1})"))))
         destructors_per_tab[tid].append(
-            t.on_reset(lambda: send_event(tid, Template(Tbody(*[Tr(cb(row), id=f"e{abs(row.__hash__())}") for row in t], hx_swap_oob=f"innerHTML: #{id}")))))
+            t.on_reset(lambda: send_event(tid, Template(Tbody(*[Tr(tds(cb(row)), id=f"e{abs(row.__hash__())}") for row in t], hx_swap_oob=f"innerHTML: #{id}")))))
         if next_button:
             r = r + Button("Next", onclick=lambda: t.set_limit(t.limit+50))
         if infinite:
@@ -147,13 +161,13 @@ def table(t, cb=None, header=None, id=None, tab_id0=None, infinite=False, next_b
             r = r + Script(f"var {id}_height = document.getElementById('{id}').clientHeight/2; var {id}_loading=false; document.addEventListener('scroll', function(evt) {{ if (!{id}_loading) if(window.scrollY+window.innerHeight > document.getElementById('{id}').clientHeight + document.getElementById('{id}').scrollTop - {id}_height) {{ {id}_loading = true; htmx.ajax('POST', '{load_more}', {{target: '#{id}'}}).then(function(data) {{ {id}_loading = false;}});}};}})")
     else:
         destructors_per_tab[tid].append(
-            t.on_insert(lambda row: send_event(tid, Template(Tbody(Tr(cb(row), id=f"e{abs(row.__hash__())}"), hx_swap_oob=f"beforeend:#{id}")))))
+            t.on_insert(lambda row: send_event(tid, Template(Tbody(Tr(tds(cb(row)), id=f"e{abs(row.__hash__())}"), hx_swap_oob=f"beforeend:#{id}")))))
         destructors_per_tab[tid].append(
             t.on_delete(lambda row: send_event(tid, Template(Tr(id=f"e{abs(row.__hash__())}", hx_swap_oob="delete")))))
         destructors_per_tab[tid].append(
-            t.on_update(lambda old, new: send_event(tid, Template(Tr(cb(new),id=f"e{abs(new.__hash__())}", hx_swap_oob=f"outerHTML: #e{abs(old.__hash__())}")))))
+            t.on_update(lambda old, new: send_event(tid, Template(Tr(tds(cb(new)),id=f"e{abs(new.__hash__())}", hx_swap_oob=f"outerHTML: #e{abs(old.__hash__())}")))))
         destructors_per_tab[tid].append(
-            t.on_reset(lambda: send_event(tid, Template(Tbody(*[Tr(cb(row), id=f"e{abs(row.__hash__())}") for row in t], hx_swap_oob=f"innerHTML: #{id}")))))
+            t.on_reset(lambda: send_event(tid, Template(Tbody(*[Tr(tds(cb(row)), id=f"e{abs(row.__hash__())}") for row in t], hx_swap_oob=f"innerHTML: #{id}")))))
     return r
 
 def ulli(t, cb, header=None, id=None):

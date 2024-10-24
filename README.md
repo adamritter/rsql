@@ -16,6 +16,15 @@
  - Pypy support, improve performance (or at least don't crash)
  - More examples, better documentation, better performance
 
+- Random tab_ids, auto reload
+- Ideomorph
+- TailwindCss support
+
+ - Internals:
+   - Maybe embrace FastAPI? 5x faster than FastHTML and it provides orthogonal features to RSQLHTML
+   - RSQL could be separate from RSQLHTML
+
+
 ## Clone the repository:
 ```
 git clone https://github.com/adamritter/rsql.git
