@@ -15,9 +15,14 @@ HTMXWS = True
 
 # TODO: fastapi support maybe, 5x faster than fasthtml
 
+import random, string
+
+def random_string(length):
+    return ''.join(random.choices(string.ascii_letters + string.digits, k=length))
+
 tab_id = contextvars.ContextVar('tab_id', default=0)
 accept_port = contextvars.ContextVar('accept_port', default=None)
-last_tab_id = 1
+last_tab_id = random_string(10)
 
 # Replace the global queues dict with a thread-safe defaultdict
 from collections import defaultdict
@@ -61,6 +66,8 @@ def with_sqlx(f, app=None):
         
         if hx_request:
             tab_id.set(sqlx_tab_id)
+            if sqlx_tab_id not in queues:
+                print("******* NOT FOUND TAB ID **********", sqlx_tab_id)
         else:
             tab_id.set(last_tab_id)
             tab_ids_by_port[accept_port.get()].append(last_tab_id)
@@ -91,7 +98,7 @@ def with_sqlx(f, app=None):
             q.append(Meta(name="htmx-config", content='{"defaultSwapStyle":"none"}'))
             if HTMXWS:
                 q.append(Div(hx_ext="ws", ws_connect=f"/htmxws/{last_tab_id}"))
-            last_tab_id += 1
+            last_tab_id = random_string(10)
         q.append(HttpHeader("Server-Timing", f"rsql.html;dur={render_time:.2f}"))
         if result:
             return (*q, result)
@@ -101,7 +108,7 @@ def with_sqlx(f, app=None):
     # Extend the wrapper's signature with the new parameter
     original_sig = signature(f)
     new_params = list(original_sig.parameters.values()) + [Parameter('hx_request', Parameter.KEYWORD_ONLY, default=None, annotation=bool),
-        Parameter('sqlx_tab_id', Parameter.KEYWORD_ONLY, default=None, annotation=int)]
+        Parameter('sqlx_tab_id', Parameter.KEYWORD_ONLY, default=None, annotation=str)]
     wrapper.__signature__ = original_sig.replace(parameters=new_params)
     
     return wrapper
@@ -126,7 +133,11 @@ def table(t, cb=None, header=None, id=None, tab_id0=None, infinite=False, next_b
     
     def maybetr(row, id=None, hx_swap_oob=None):
         if isinstance(row, fasttag.HTML) and row.tag == "tr":
-            return fasttag.HTML(f"<tr{id and f' id=\"{id}\"' or ''}{hx_swap_oob and f' hx-swap-oob=\"{hx_swap_oob}\"' or ''}{str(row)[3:]}")
+            s = f"<tr{id and f' id=\"{id}\"' or ''}{hx_swap_oob and f' hx-swap-oob=\"{hx_swap_oob}\"' or ''}{str(row)[3:]}"
+            print("maybetr", s)
+            r = fasttag.HTML(s)
+            print("maybetr2", r)
+            return r
         else:
             return Tr(tds(cb(row)), id=id, hx_swap_oob=hx_swap_oob)
     
@@ -245,10 +256,6 @@ def register_table(rtx, model):
 def register_tables(rtx, db):
     for t in db.tables.values():
         register_table(rtx, t)
-import random, string
-
-def random_string(length):
-    return ''.join(random.choices(string.ascii_letters + string.digits, k=length))
 
 
 def post_method_creator(app):
@@ -330,11 +337,13 @@ def rsql_html_app(live=True, debug=True, db=None, hdrs=static_hdrs, default_hdrs
         db.tohtml = lambda v: value(v, tab_id0)
 
     async def on_conn(ws, send):
-        tid = int(ws.url.path.split('/')[-1])
+        tid = (ws.url.path.split('/')[-1])
+        if tid not in queues:
+            print("******* WS CONNECTED WITH NOT FOUND TAB ID **********", tid)
         sends[tid] = send
 
     async def on_disconn(ws, send):
-        tid = int(ws.url.path.split('/')[-1])
+        tid = (ws.url.path.split('/')[-1])
         if tid in sends:
             del sends[tid]
     if HTMXWS:
