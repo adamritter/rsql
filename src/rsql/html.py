@@ -12,6 +12,7 @@ import contextvars
 import rsql
 from functools import lru_cache as memoize
 HTMXWS = True
+DEBUG_SEND = int(os.getenv("DEBUG_SEND", "0"))
 
 # TODO: fastapi support maybe, 5x faster than fasthtml
 
@@ -34,11 +35,13 @@ destructors_per_tab = defaultdict(list)
 sends = {}
 import asyncio
 def send_event(target_tab_id, event):
-    # print("send_event", target_tab_id, tab_id.get(), event, sends)
+    if DEBUG_SEND:
+        print(f"send_event target {target_tab_id} from tab {tab_id.get()} event {event}")
     if target_tab_id == tab_id.get():
         queues[target_tab_id].put(event)
     elif target_tab_id in sends:
-        # print("sending to ws", target_tab_id)
+        if DEBUG_SEND:
+            print(f"sending to ws {target_tab_id}")
         asyncio.run(sends[target_tab_id](event))
     else:
         queues[target_tab_id].put(event)
@@ -60,9 +63,10 @@ def with_sqlx(f, app=None):
     def wrapper(*args):
         global last_tab_id
         start_time = time.time()
-        sqlx_tab_id = args[-1]
-        hx_request = args[-2]
-        args = args[:-2]
+        redirect = args[-1]
+        sqlx_tab_id = args[-2]
+        hx_request = args[-3]
+        args = args[:-3]
         
         if hx_request:
             tab_id.set(sqlx_tab_id)
@@ -100,6 +104,12 @@ def with_sqlx(f, app=None):
                 q.append(Div(hx_ext="ws", ws_connect=f"/htmxws/{last_tab_id}"))
             last_tab_id = random_string(10)
         q.append(HttpHeader("Server-Timing", f"rsql.html;dur={render_time:.2f}"))
+        if redirect:
+            if hx_request:
+                q.append(HttpHeader("HX-Redirect", redirect))
+            else:
+                q.append(RedirectResponse(redirect, status_code=303))
+            print("redirect q", q)
         if result:
             return (*q, result)
         else:
@@ -108,7 +118,8 @@ def with_sqlx(f, app=None):
     # Extend the wrapper's signature with the new parameter
     original_sig = signature(f)
     new_params = list(original_sig.parameters.values()) + [Parameter('hx_request', Parameter.KEYWORD_ONLY, default=None, annotation=bool),
-        Parameter('sqlx_tab_id', Parameter.KEYWORD_ONLY, default=None, annotation=str)]
+        Parameter('sqlx_tab_id', Parameter.KEYWORD_ONLY, default=None, annotation=str),
+        Parameter('redirect', Parameter.KEYWORD_ONLY, default=False, annotation=str)]
     wrapper.__signature__ = original_sig.replace(parameters=new_params)
     
     return wrapper
@@ -133,11 +144,7 @@ def table(t, cb=None, header=None, id=None, tab_id0=None, infinite=False, next_b
     
     def maybetr(row, id=None, hx_swap_oob=None):
         if isinstance(row, fasttag.HTML) and row.tag == "tr":
-            s = f"<tr{id and f' id=\"{id}\"' or ''}{hx_swap_oob and f' hx-swap-oob=\"{hx_swap_oob}\"' or ''}{str(row)[3:]}"
-            print("maybetr", s)
-            r = fasttag.HTML(s)
-            print("maybetr2", r)
-            return r
+            return fasttag.HTML(f"<tr{id and f' id=\"{id}\"' or ''}{hx_swap_oob and f' hx-swap-oob=\"{hx_swap_oob}\"' or ''}{str(row)[3:]}")
         else:
             return Tr(tds(cb(row)), id=id, hx_swap_oob=hx_swap_oob)
     
@@ -266,6 +273,7 @@ def post_method_creator(app):
             name = "lambda"
         url = f"/app/{name}/{random_string(10)}"
         app.post(url)(ws)
+        print(f"registered post {url}")
         rr=None
         for r in app.routes:
             if r.path == url:
@@ -339,8 +347,11 @@ def rsql_html_app(live=True, debug=True, db=None, hdrs=static_hdrs, default_hdrs
     async def on_conn(ws, send):
         tid = (ws.url.path.split('/')[-1])
         if tid not in queues:
-            print("******* WS CONNECTED WITH NOT FOUND TAB ID **********", tid)
+            print("******* WS CONNECTED WITH NOT FOUND TAB ID, RELOADING **********", tid)
+            await send("<script>window.location.reload();</script>")
+            return
         sends[tid] = send
+        print(f"ws connected with tab id {tid}")
 
     async def on_disconn(ws, send):
         tid = (ws.url.path.split('/')[-1])
@@ -454,6 +465,8 @@ def serve(appname=None, app='app', port=5001, reload=True, log_level="info", hos
     )
     print("rsql_html: serve server stopped")
 
+def Script(*args, **kwargs):
+    return Span(fasttag.Script(*args, **kwargs), hx_swap_oob="beforeend: body")
 
 # Usage:
 #

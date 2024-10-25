@@ -343,11 +343,14 @@ class Row:
         self.__table__.update(old_values, **values)
         self.__updating__ = False
 
-    def delete_urlm(self):
-        return URLM(f"/{self.__table__.name}/{self.id}", "delete")
+    def delete_urlm(self, redirect=None):
+        redirect_query = f"?redirect={redirect}" if redirect else ""
+        return URLM(f"/{self.__table__.name}/{self.id}{redirect_query}", "delete")
     
-    def update_urlm(self, **values):
-        return URLM(f"/{self.__table__.name}/{self.id}?{urlencode(values)}", "patch")
+    def update_urlm(self, redirect=None, **values):
+        values_with_redirect = {**values, "redirect": redirect} if redirect else values
+        query = f"?{urlencode(values_with_redirect)}" if values_with_redirect else ""
+        return URLM(f"/{self.__table__.name}/{self.id}{query}", "patch")
 
 class View:
     """
@@ -389,6 +392,8 @@ class View:
             self.parent.delete_cbs.append(self.delete_cbs_ref)
             self.reset_cbs_ref = methodref(self.call_reset_cbs)
             self.parent.reset_cbs.append(self.reset_cbs_ref)
+            self.name = self.parent.name
+
     
     def tohtml(self, valueobj):
         return self.db.tohtml(valueobj)
@@ -1336,7 +1341,8 @@ class Table(View):
     def call_insert_cbs(self, table, values):
         if table != self.name:
             return
-        print("Table insert", values)
+        if DEBUG:   
+            print("Table insert", values)
         values_array = [values[col] for col in self.columns]
         values2 = {k: v for k, v in zip(self.columns, self.maybe_to_bool(values_array))}
         for cb in self.insert_cbs:
