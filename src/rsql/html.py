@@ -32,6 +32,7 @@ tab_ids_by_port = defaultdict(list)
 objects_per_tab = defaultdict(list)
 routes_per_tab = defaultdict(list)
 destructors_per_tab = defaultdict(list)
+tab_refcounts = defaultdict(int)
 sends = {}
 import asyncio
 def send_event(target_tab_id, event):
@@ -75,7 +76,7 @@ def with_sqlx(f, app=None):
         else:
             tab_id.set(last_tab_id)
             tab_ids_by_port[accept_port.get()].append(last_tab_id)
-        
+            tab_refcounts[last_tab_id] += 1
         # print("args", args, "hx_request", hx_request, "sqlx_tab_id", sqlx_tab_id, "tab_id", tab_id, "app", app, "accept_port", accept_port)
         global global_app
         global_app = app
@@ -130,63 +131,6 @@ def nextid():
     lastid += 1
     return f"e{lastid}"
 
-def table(t, cb=None, header=None, id=None, tab_id0=None, infinite=False, next_button=False, limit=None, order_by=None):
-    if ((infinite or next_button) or limit or order_by) and type(t) != rsql.Sort:
-        t = t.sort(limit=(limit or 50), order_by=order_by)
-    if not id:
-        id = nextid()
-    if not cb:
-        cb = lambda x: tuple([Td(x[col]) for col in t.columns])
-    if header:
-        header = tuple([x if isinstance(x, fasttag.HTML) and x.tag == "th" else Th(x) for x in header])
-    else:
-        header = tuple([Th(col) for col in t.columns])
-    
-    def maybetr(row, id=None, hx_swap_oob=None):
-        if isinstance(row, fasttag.HTML) and row.tag == "tr":
-            return fasttag.HTML(f"<tr{id and f' id=\"{id}\"' or ''}{hx_swap_oob and f' hx-swap-oob=\"{hx_swap_oob}\"' or ''}{str(row)[3:]}")
-        else:
-            return Tr(tds(cb(row)), id=id, hx_swap_oob=hx_swap_oob)
-    
-    def tds(row):
-        if isinstance(row, fasttag.HTML):
-            return row
-        else:
-            return tuple([x if isinstance(x, fasttag.HTML) and x.tag == "td" else Td(x) for x in row])
-    r = fasttag.Table(
-        *([Thead(header)] if header else []),
-        Tbody(*[maybetr(tds(cb(row)), id=f"e{abs(row.__hash__())}") for row in t], id=id))
-    if tab_id0:
-        tid = tab_id0.get()
-    else:
-        tid = tab_id.get()
-    objects_per_tab[tid].append(t)
-    if type(t) == rsql.Sort:
-        destructors_per_tab[tid].append(
-            t.on_insert(lambda index, row: send_event(tid, Template(Tbody(Tr(tds(cb(row)), id=f"e{abs(row.__hash__())}"),
-                                    hx_swap_oob=(f"afterend: #{id} > :nth-child({index})" if index else f"beforeend: #{id}"))))))
-        destructors_per_tab[tid].append(
-            t.on_update(lambda index, old, new: send_event(tid, Template(Tr(tds(cb(new)),id=f"e{abs(new.__hash__())}", 
-                                                                     hx_swap_oob=f"outerHTML: #{id} > :nth-child({index+1})")))))
-        destructors_per_tab[tid].append(
-            t.on_delete(lambda index, row: send_event(tid, Template(hx_swap_oob=f"delete: #{id} > :nth-child({index+1})"))))
-        destructors_per_tab[tid].append(
-            t.on_reset(lambda: send_event(tid, Template(Tbody(*[Tr(tds(cb(row)), id=f"e{abs(row.__hash__())}") for row in t], hx_swap_oob=f"innerHTML: #{id}")))))
-        if next_button:
-            r = r + Button("Next", onclick=lambda: t.set_limit(t.limit+50))
-        if infinite:
-            load_more = post_method_creator(global_app)(lambda: t.set_limit(t.limit+50))
-            r = r + Script(f"var {id}_height = document.getElementById('{id}').clientHeight/2; var {id}_loading=false; document.addEventListener('scroll', function(evt) {{ if (!{id}_loading) if(window.scrollY+window.innerHeight > document.getElementById('{id}').clientHeight + document.getElementById('{id}').scrollTop - {id}_height) {{ {id}_loading = true; htmx.ajax('POST', '{load_more}', {{target: '#{id}'}}).then(function(data) {{ {id}_loading = false;}});}};}})")
-    else:
-        destructors_per_tab[tid].append(
-            t.on_insert(lambda row: send_event(tid, Template(Tbody(Tr(tds(cb(row)), id=f"e{abs(row.__hash__())}"), hx_swap_oob=f"beforeend:#{id}")))))
-        destructors_per_tab[tid].append(
-            t.on_delete(lambda row: send_event(tid, Template(Tr(id=f"e{abs(row.__hash__())}", hx_swap_oob="delete")))))
-        destructors_per_tab[tid].append(
-            t.on_update(lambda old, new: send_event(tid, Template(Tr(tds(cb(new)),id=f"e{abs(new.__hash__())}", hx_swap_oob=f"outerHTML: #e{abs(old.__hash__())}")))))
-        destructors_per_tab[tid].append(
-            t.on_reset(lambda: send_event(tid, Template(Tbody(*[Tr(tds(cb(row)), id=f"e{abs(row.__hash__())}") for row in t], hx_swap_oob=f"innerHTML: #{id}")))))
-    return r
 
 def ulli(t, cb, header=None, id=None):
     if not id:
@@ -295,12 +239,27 @@ def Button(text, onclick=None, **kwargs):
         return fasttag.Button(text, **kwargs)
     else:
         return fasttag.Button(text, onclick=onclick, **kwargs)
+    
+def Tr(*args, onclick=None, **kwargs):
+    if callable(onclick):
+        onclick = post_method_creator(global_app)(onclick)
+    if isinstance(onclick, URLM):
+        kwargs[f"hx_{onclick.__method__}"] = str(onclick)
+    else:
+        kwargs["onclick"] = onclick
+    return fasttag.Tr(*args, **kwargs)
 
-def Input(onchange=None, **kwargs):
+def Input(onchange=None, onkeyup=None, **kwargs):
     if callable(onchange):
         onchange = post_method_creator(global_app)(onchange)
+    if callable(onkeyup):
+        onkeyup = post_method_creator(global_app)(onkeyup)
     if isinstance(onchange, URLM):
         kwargs[f"hx_{onchange.__method__}"] = str(onchange)
+        return fasttag.Input(**kwargs)
+    if isinstance(onkeyup, URLM):
+        kwargs[f"hx_{onkeyup.__method__}"] = str(onkeyup)
+        kwargs[f"hx_trigger"] = "keyup changed"
         return fasttag.Input(**kwargs)
     elif not onchange:
         return fasttag.Input(**kwargs)
@@ -320,6 +279,75 @@ def Form(*args, onsubmit=None, **kwargs):
         return fasttag.Form(*args, onsubmit=onsubmit, **kwargs)
 
 
+def table(t, cb=None, header=None, id=None, tab_id0=None, infinite=False, next_button=False, limit=None, order_by=None,
+          sortable=False, delete=False, onclick=None):
+    if ((infinite or next_button) or limit or order_by) and type(t) != rsql.Sort:
+        t = t.sort(limit=(limit or 50), order_by=order_by)
+    if not id:
+        id = nextid()
+
+           
+    if header:
+        header = tuple([x if isinstance(x, fasttag.HTML) and x.tag == "th" else Th(x) for x in header])
+    else:
+        if sortable:
+            def th_with_onclick(col):
+                return Th(Button(col, onclick=lambda: t.set_order_by(col, limit or 50)))
+            header = tuple([th_with_onclick(col) for col in t.columns])
+        else:
+            header = tuple([Th(col) for col in t.columns])
+    if delete:
+        header = header + (Th("Delete"),)
+
+    def trcbfunc(row, id=None):
+        if cb:
+            r = cb(row)
+        else:
+            r = tuple([Td(row[col]) for col in t.columns])
+        if delete and isinstance(r, tuple):
+            r = r + (Td(Button("Delete", onclick=row.delete_urlm)),)
+        if isinstance(r, fasttag.HTML) and r.tag == "tr":
+            return fasttag.HTML(f"<tr{id and f' id=\"{id}\"' or ''}{str(r)[3:]}")
+        elif isinstance(r, fasttag.HTML):
+            pass
+        else:
+            r = tuple([x if isinstance(x, fasttag.HTML) and x.tag == "td" else Td(x) for x in r])  
+        return Tr(r, id=id, onclick=onclick(row) if onclick else None)
+    r = fasttag.Table(
+        *([Thead(header)] if header else []),
+        Tbody(*[trcbfunc(row, id=f"e{abs(row.__hash__())}") for row in t], id=id))
+    if tab_id0:
+        tid = tab_id0.get()
+    else:
+        tid = tab_id.get()
+    objects_per_tab[tid].append(t)
+    if type(t) == rsql.Sort:
+        destructors_per_tab[tid].append(
+            t.on_insert(lambda index, row: send_event(tid, Template(Tbody(trcbfunc(row, id=f"e{abs(row.__hash__())}"),
+                                    hx_swap_oob=(f"afterend: #{id} > :nth-child({index})" if index else f"beforeend: #{id}"))))))
+        destructors_per_tab[tid].append(
+            t.on_update(lambda index, old, new: send_event(tid, Template(trcbfunc(new, id=f"e{abs(new.__hash__())}", 
+                                                                     hx_swap_oob=f"outerHTML: #{id} > :nth-child({index+1})")))))
+        destructors_per_tab[tid].append(
+            t.on_delete(lambda index, row: send_event(tid, Template(hx_swap_oob=f"delete: #{id} > :nth-child({index+1})"))))
+        destructors_per_tab[tid].append(
+            t.on_reset(lambda: send_event(tid, Template(Tbody(*[trcbfunc(row, id=f"e{abs(row.__hash__())}") for row in t], hx_swap_oob=f"innerHTML: #{id}")))))
+        if next_button:
+            r = r + Button("Next", onclick=lambda: t.set_limit(t.limit+50))
+        if infinite:
+            load_more = post_method_creator(global_app)(lambda: t.set_limit(t.limit+50))
+            r = r + Script(f"var {id}_height = document.getElementById('{id}').clientHeight/2; var {id}_loading=false; document.addEventListener('scroll', function(evt) {{ if (!{id}_loading) if(window.scrollY+window.innerHeight > document.getElementById('{id}').clientHeight + document.getElementById('{id}').scrollTop - {id}_height) {{ {id}_loading = true; htmx.ajax('POST', '{load_more}', {{target: '#{id}'}}).then(function(data) {{ {id}_loading = false;}});}};}})")
+    else:
+        destructors_per_tab[tid].append(
+            t.on_insert(lambda row: send_event(tid, Template(Tbody(trcbfunc(row, id=f"e{abs(row.__hash__())}"), hx_swap_oob=f"beforeend:#{id}")))))
+        destructors_per_tab[tid].append(
+            t.on_delete(lambda row: send_event(tid, Template(Tr(id=f"e{abs(row.__hash__())}", hx_swap_oob="delete")))))
+        destructors_per_tab[tid].append(
+            t.on_update(lambda old, new: send_event(tid, Template(trcbfunc(new, id=f"e{abs(new.__hash__())}", hx_swap_oob=f"outerHTML: #e{abs(old.__hash__())}")))))
+        destructors_per_tab[tid].append(
+            t.on_reset(lambda: send_event(tid, Template(Tbody(*[trcbfunc(row, id=f"e{abs(row.__hash__())}") for row in t], hx_swap_oob=f"innerHTML: #{id}")))))
+    return r
+
 class ServerTimingMiddleware:
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
@@ -331,6 +359,23 @@ class ServerTimingMiddleware:
                 message['headers'].append((b'Server-Timing', f"fasthtml;dur={1000*(time.time() - t):.2f}".encode()))
             await send(message)
         await self.app(scope, receive, _send)
+
+def remove_tab(tid):
+    print("removing tab", tid)
+    if tid in queues:
+        del queues[tid]
+    if tid in objects_per_tab:
+        del objects_per_tab[tid]
+    if tid in routes_per_tab:
+        for r in routes_per_tab[tid]:
+            print("removing route", r)
+            global_app.routes.remove(r)
+        del routes_per_tab[tid]
+    if tid in destructors_per_tab:
+        for d in destructors_per_tab[tid]:
+            d()
+        del destructors_per_tab[tid]
+        
 
 import asyncio
 def rsql_html_app(live=True, debug=True, db=None, hdrs=static_hdrs, default_hdrs=False, before=None, pico=False, **kwargs):
@@ -347,16 +392,22 @@ def rsql_html_app(live=True, debug=True, db=None, hdrs=static_hdrs, default_hdrs
     async def on_conn(ws, send):
         tid = (ws.url.path.split('/')[-1])
         if tid not in queues:
-            print("******* WS CONNECTED WITH NOT FOUND TAB ID, RELOADING **********", tid)
-            await send("<script>window.location.reload();</script>")
+            print(f"******* WS CONNECTED WITH NOT FOUND TAB ID, RELOADING {tid} **********")
+            await send("<template hx-swap-oob='beforeend: body'><script>window.location.reload();</script></template>")
             return
+        tab_refcounts[tid] += 1
         sends[tid] = send
-        print(f"ws connected with tab id {tid}")
+        print(f"ws connected with tab id {tid}, refcount {tab_refcounts[tid]}")
 
     async def on_disconn(ws, send):
         tid = (ws.url.path.split('/')[-1])
         if tid in sends:
             del sends[tid]
+        tab_refcounts[tid] -= 1
+        print(f"ws disconnected with tab id {tid}, refcount {tab_refcounts[tid]}")
+        if tab_refcounts[tid] == 0:
+            remove_tab(tid)
+
     if HTMXWS:
         @app.ws('/htmxws/{tid}', conn=on_conn, disconn=on_disconn)
         async def on_message(send):
@@ -366,26 +417,17 @@ def rsql_html_app(live=True, debug=True, db=None, hdrs=static_hdrs, default_hdrs
 class LoggingProtocol(H11Protocol):
     def connection_made(self, transport):
         peername = transport.get_extra_info('peername')
-        # print(f"Connection accepted from {peername}")
+        print(f"Connection accepted from {peername}")
         super().connection_made(transport)
 
     def connection_lost(self, exc):
         super().connection_lost(exc)
-        # print("Connection closed from", self.client, ", closing ", len(tab_ids_by_port[self.client[1]]), "tabs")
+        print("Connection closed from", self.client, ", closing ", len(tab_ids_by_port[self.client[1]]), "tabs")
         for tid in tab_ids_by_port[self.client[1]]:
-            # print("closing tab", tid, "because connection closed", self.client)
-            if tid in queues:
-                del queues[tid]
-            if tid in objects_per_tab:
-                del objects_per_tab[tid]
-            if tid in routes_per_tab:
-                for r in routes_per_tab[tid]:
-                    global_app.routes.remove(r)
-                del routes_per_tab[tid]
-            if tid in destructors_per_tab:
-                for d in destructors_per_tab[tid]:
-                    d()
-                del destructors_per_tab[tid]
+            tab_refcounts[tid] -= 1
+            print(f"closing tab {tid} if refcount is 0 because connection closed {self.client}, refcount {tab_refcounts[tid]}")
+            if tab_refcounts[tid] == 0:
+                remove_tab(tid)
         del tab_ids_by_port[self.client[1]]
     
     def data_received(self, data):

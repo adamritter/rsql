@@ -2136,6 +2136,18 @@ class Sort(View):
         for cb in self.reset_cbs:
             cb()    
 
+    def set_order_by(self, order_by, limit=None):
+        if isinstance(order_by, str):
+            order_by = [order_by]
+        if self.order_by == order_by:
+            return
+        self.order_by = order_by
+        if limit:
+            self.limit = limit
+        self.reset()
+        for cb in self.reset_cbs:
+            cb()
+
     def set_limit(self, limit, reset=False):
         if self.limit == limit:
             return
