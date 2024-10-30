@@ -36,7 +36,7 @@ Functions:
     ...
 
 Constants:
-    - DEBUG
+    - DEBUG_SQL
     - DEBUG_VIEWS
     - AUTOINCREMENT
     - CHECK_SAME_THREAD
@@ -67,7 +67,7 @@ Constants:
 import os, threading, traceback
 from urllib.parse import urlencode
 
-DEBUG = os.environ.get('DEBUG', 'False').lower() in ['true', '1', 'yes', 'on']
+DEBUG_SQL = os.environ.get('DEBUG_SQL', 'False').lower() in ['true', '1', 'yes', 'on']
 DEBUG_VIEWS = os.environ.get('DEBUG_VIEWS', 'False').lower() in ['true', '1', 'yes', 'on']
 
 import sqlite3, importlib, sys, time, typing, weakref
@@ -125,7 +125,7 @@ def execute(cursor, query, params=None):
     Returns:
         cursor: The cursor object after executing the query.
     """
-    if DEBUG:
+    if DEBUG_SQL:
         if params:
             print(query, params)
         else:
@@ -1341,7 +1341,7 @@ class Table(View):
     def call_insert_cbs(self, table, values):
         if table != self.name:
             return
-        if DEBUG:   
+        if DEBUG_SQL:   
             print("Table insert", values)
         values_array = [values[col] for col in self.columns]
         values2 = {k: v for k, v in zip(self.columns, self.maybe_to_bool(values_array))}
@@ -1726,6 +1726,8 @@ def hash(x):
         return hash(frozenset(x.items()))
     return x.__hash__()
 
+def assert_eq(x, y, msg=None):
+    assert x == y, (x, y, msg)
 
 def track_view(obj):
     """
@@ -1748,14 +1750,20 @@ def track_view(obj):
         except ValueError:
             raise Exception(f"Row not found: {rowa} in {rows} for {obj.query}")
         print(f"track_view delete_row from {obj}: {row} {rows}")
-    insert_cb = lambda x: print(f"track_view insert_cb {x} {rows}") or rows.append(tuple([x[col] for col in obj.columns]))
+    if type(obj) == Sort:
+        insert_cb = lambda index, row: print(f"track_view sort insert_cb {index} {row} {rows}") or rows.insert(index, tuple([row[col] for col in obj.columns]))
+        update_cb = lambda old_index, new_index, old, new: print(f"track_view sort update_cb {old_index} {new_index} {old} {new}") or assert_eq(rows.pop(old_index), tuple([old[col] for col in obj.columns])) or rows.insert(new_index, tuple([new[col] for col in obj.columns]))
+        delete_cb = lambda index, row: print(f"track_view sort delete_cb {index} {row} {rows}") or assert_eq(rows.pop(index), tuple([row[col] for col in obj.columns]))
+    else:
+        insert_cb = lambda x: print(f"track_view insert_cb {x} {rows}") or rows.append(tuple([x[col] for col in obj.columns]))
+        update_cb = lambda old, new: print(f"track_view update_cb {old} {new}") or delete_row(old) or insert_cb(new)
+        delete_cb = delete_row
     obj.insert_cbs.append(insert_cb)
-    update_cb = lambda old, new: print(f"track_view update_cb {old} {new}") or delete_row(old) or insert_cb(new)
     obj.update_cbs.append(update_cb)
-    obj.delete_cbs.append(delete_row)
+    obj.delete_cbs.append(delete_cb)
     reset_cb = lambda: rows.clear() or rows.extend(obj.fetchall())
     obj.reset_cbs.append(reset_cb)
-    return rows, [row for row in rows], insert_cb, update_cb, delete_row, reset_cb
+    return rows, [row for row in rows], insert_cb, update_cb, delete_cb, reset_cb
 
 def track_views():
     """
@@ -1770,7 +1778,7 @@ def track_views():
     """
     views = []
     for obj in gc.get_objects():
-        if isinstance(obj, View) and not isinstance(obj, Sort):
+        if isinstance(obj, View):
             views.append([obj, *track_view(obj)])
     def end_track(query):
         print("end_track", [[type(view), rows] for view, rows, before, insert_cb, update_cb, delete_cb, reset_cb in views])
@@ -2022,7 +2030,7 @@ class Database:
             list: The result of the query execution.
         """
         with self.lock:
-            if DEBUG:
+            if DEBUG_SQL:
                 print("db.execute", query)
             cursor = self.get_cursor()
             try:
@@ -2047,7 +2055,7 @@ class Database:
             tuple: The first row of the query result.
         """
         with self.lock:
-            if DEBUG:
+            if DEBUG_SQL:
                 if values:
                     print(f"db.fetchone {query}, values: {values}")
                 else:
@@ -2075,7 +2083,7 @@ class Database:
             list: All rows of the query result.
         """
         with self.lock:
-            if DEBUG:
+            if DEBUG_SQL:
                 print("db.fetchall", query)
             cursor = self.get_cursor()
             try:
