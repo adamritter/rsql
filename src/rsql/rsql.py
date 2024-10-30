@@ -2121,11 +2121,14 @@ class Sort(View):
         self.order_by.extend(remaining_columns)
         self.reset()
 
-    def reset(self):
+    def reset_query(self):
         order_clause = f"ORDER BY {', '.join(self.order_by)}"
         limit_clause = f"LIMIT {self.limit}" if self.limit is not None else ""
         offset_clause = f"OFFSET {self.offset}" if self.offset is not None else ""
         self.query = f"SELECT * FROM ({self.parent.query}) {order_clause} {limit_clause} {offset_clause}"
+
+    def reset(self):
+        self.reset_query()
         self.sorted_results = self.fetchall()
 
     def set_offset(self, offset):
@@ -2154,15 +2157,16 @@ class Sort(View):
         if reset:
             self.limit = limit
             self.reset()
-            print("reset", self.limit, self.offset, "calling", len(self.reset_cbs), "callbacks")
             for cb in self.reset_cbs:
                 cb()
         else:
             if self.limit is not None and self.limit > limit:
                 self.limit = limit
+                self.reset_query()
                 for i in range(len(self.sorted_results) - 1, limit - 1, -1):
+                    row = self.sorted_results.pop(i)
                     for cb in self.delete_cbs:
-                        cb(i, self.sorted_results[i])
+                        cb(i, Row({k: v for k, v in zip(self.parent.columns, row)}, self))
             else:
                 old_limit = self.limit
                 # Fetch new results
@@ -2203,8 +2207,9 @@ class Sort(View):
         old_row = tuple(old[col] for col in self.parent.columns)
         new_row = tuple(new[col] for col in self.parent.columns)
         if old_row not in self.sorted_results:
-            self.parent.print()
-            raise Exception(f"old_row not in self.sorted_results: {old_row} {self.sorted_results}, {self.query} {self.parent.columns}")
+            self.call_delete_cbs(old)
+            self.call_insert_cbs(new)
+            return
 
         old_index = self.sorted_results.index(old_row)
         self.sorted_results.pop(old_index)
@@ -2243,7 +2248,7 @@ class Sort(View):
                     cb(self.limit - 1, dict(zip(self.parent.columns, new_last_row)))
 
     def on_delete(self, cb):
-        f = lambda index, row: cb(index, Row(row, self))
+        f = lambda index, row: print("calling zip for row", row, type(row), ", parent type: ", type(self.parent)) or cb(index, Row(row, self))
         self.delete_cbs.append(f)
         return lambda: self.delete_cbs.remove(f)
 

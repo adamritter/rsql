@@ -38,13 +38,13 @@ def test_sort1(t, f):
     N += 1
     rows = t.fetchall()
     t.insert_cbs.append(lambda index, row: print("insert called", index, row, rows) or rows.insert(index, tuple([row[k] for k in t.columns])))
-    t.delete_cbs.append(lambda index, row: assert_eq(rows.pop(index), tuple([row[k] for k in t.columns])))
+    on_delete_remove_cb = t.on_delete(lambda index, row: print("row", row) or assert_eq(rows.pop(index), tuple([row[k] for k in t.columns]), f"delete called {index} {row} {rows} {t.query}"))
     t.update_cbs.append(lambda old_index, new_index, old, new:
-                        assert_eq(rows.pop(old_index), old, t.query) or rows.insert(new_index, new, t.query))
+                        assert_eq(rows.pop(old_index), old, f"update called {old_index} {old} {rows} {t.query}") or rows.insert(new_index, new, f"update called {new_index} {new} {rows} {t.query}"))
     t.reset_cbs.append(lambda: assign(rows, t.fetchall()))
     f()
     t.insert_cbs.pop()
-    t.delete_cbs.pop()
+    on_delete_remove_cb()
     t.update_cbs.pop()
     t.reset_cbs.pop()
     rows2 = t.fetchall()
