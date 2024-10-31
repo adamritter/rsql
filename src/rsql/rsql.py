@@ -1729,6 +1729,10 @@ def hash(x):
 def assert_eq(x, y, msg=None):
     assert x == y, (x, y, msg)
 
+def dprint(*args):
+    if DEBUG_VIEWS >= 2:
+        print(*args)
+
 def track_view(obj):
     """
     Track a view and its associated rows.
@@ -1749,14 +1753,14 @@ def track_view(obj):
             rows.remove(rowa)
         except ValueError:
             raise Exception(f"Row not found: {rowa} in {rows} for {obj.query}")
-        print(f"track_view delete_row from {obj}: {row} {rows}")
+        dprint(f"track_view delete_row from {obj}: {row} {rows}")
     if type(obj) == Sort:
-        insert_cb = lambda index, row: print(f"track_view sort insert_cb {index} {row} {rows}") or rows.insert(index, tuple([row[col] for col in obj.columns]))
-        update_cb = lambda old_index, new_index, old, new: print(f"track_view sort update_cb {old_index} {new_index} {old} {new}") or assert_eq(rows.pop(old_index), tuple([old[col] for col in obj.columns])) or rows.insert(new_index, tuple([new[col] for col in obj.columns]))
-        delete_cb = lambda index, row: print(f"track_view sort delete_cb {index} {row} {rows}") or assert_eq(rows.pop(index), tuple([row[col] for col in obj.columns]))
+        insert_cb = lambda index, row: dprint(f"track_view sort insert_cb {index} {row} {rows}") or rows.insert(index, tuple([row[col] for col in obj.columns]))
+        update_cb = lambda old_index, new_index, old, new: dprint(f"track_view sort update_cb {old_index} {new_index} {old} {new}") or assert_eq(rows.pop(old_index), tuple([old[col] for col in obj.columns])) or rows.insert(new_index, tuple([new[col] for col in obj.columns]))
+        delete_cb = lambda index, row: dprint(f"track_view sort delete_cb {index} {row} {rows}") or assert_eq(rows.pop(index), tuple([row[col] for col in obj.columns]))
     else:
-        insert_cb = lambda x: print(f"track_view insert_cb {x} {rows}") or rows.append(tuple([x[col] for col in obj.columns]))
-        update_cb = lambda old, new: print(f"track_view update_cb {old} {new}") or delete_row(old) or insert_cb(new)
+        insert_cb = lambda x: dprint(f"track_view insert_cb {x} {rows}") or rows.append(tuple([x[col] for col in obj.columns]))
+        update_cb = lambda old, new: dprint(f"track_view update_cb {old} {new}") or delete_row(old) or insert_cb(new)
         delete_cb = delete_row
     obj.insert_cbs.append(insert_cb)
     obj.update_cbs.append(update_cb)
@@ -1778,10 +1782,10 @@ def track_views():
     """
     views = []
     for obj in gc.get_objects():
-        if isinstance(obj, View):
+        if isinstance(obj, View):  # TODO: Make the class selectable in the environment
             views.append([obj, *track_view(obj)])
     def end_track(query):
-        print("end_track", [[type(view), rows] for view, rows, before, insert_cb, update_cb, delete_cb, reset_cb in views])
+        # print("end_track", [[type(view), rows] for view, rows, before, insert_cb, update_cb, delete_cb, reset_cb in views])
         for view, rows, before, insert_cb, update_cb, delete_cb, reset_cb in views:
             view.insert_cbs.remove(insert_cb)
             view.update_cbs.remove(update_cb)

@@ -40,12 +40,16 @@ def send_event(target_tab_id, event):
         print(f"send_event target {target_tab_id} from tab {tab_id.get()} event {event}")
     if target_tab_id == tab_id.get():
         queues[target_tab_id].put(event)
+        if DEBUG_SEND:
+            print(f"putting event to queue {target_tab_id}, now size: {queues[target_tab_id].qsize()}")
     elif target_tab_id in sends:
         if DEBUG_SEND:
             print(f"sending to ws {target_tab_id}")
         asyncio.run(sends[target_tab_id](event))
     else:
         queues[target_tab_id].put(event)
+        if DEBUG_SEND:
+            print(f"putting event to queue {target_tab_id}, now size: {queues[target_tab_id].qsize()}")
 
 def rt_with_sqlx(rt, app):
     def rtx(route):
@@ -74,10 +78,12 @@ def with_sqlx(f, app=None):
             if sqlx_tab_id not in queues:
                 print("******* NOT FOUND TAB ID **********", sqlx_tab_id)
         else:
+            print("setting tab id", last_tab_id)
             tab_id.set(last_tab_id)
             tab_ids_by_port[accept_port.get()].append(last_tab_id)
             tab_refcounts[last_tab_id] += 1
-        # print("args", args, "hx_request", hx_request, "sqlx_tab_id", sqlx_tab_id, "tab_id", tab_id, "app", app, "accept_port", accept_port)
+            queues[last_tab_id] = Queue()
+        # print("args", args, "hx_request", hx_request, "sqlx_tab_id", sqlx_tab_id, "tab_id", tab_id.get(), "app", app, "accept_port", accept_port)
         global global_app
         global_app = app
         result = f(*args)
@@ -91,8 +97,11 @@ def with_sqlx(f, app=None):
                 else:
                     t.append(r)
             result = tuple(t)
-        q = list(queues[tab_id.get()].queue)
-        queues[tab_id.get()] = Queue()
+        if hx_request:
+            q = list(queues[tab_id.get()].queue)
+            queues[tab_id.get()] = Queue()
+        else:
+            q = []
         
         end_time = time.time()
         render_time = (end_time - start_time) * 1000  # Convert to milliseconds
@@ -245,7 +254,7 @@ def Tr(*args, onclick=None, **kwargs):
         onclick = post_method_creator(global_app)(onclick)
     if isinstance(onclick, URLM):
         kwargs[f"hx_{onclick.__method__}"] = str(onclick)
-    else:
+    elif onclick:
         kwargs["onclick"] = onclick
     return fasttag.Tr(*args, **kwargs)
 
@@ -324,10 +333,16 @@ def table(t, cb=None, header=None, id=None, tab_id0=None, infinite=False, next_b
     if type(t) == rsql.Sort:
         destructors_per_tab[tid].append(
             t.on_insert(lambda index, row: send_event(tid, Template(Tbody(trcbfunc(row, id=f"e{abs(row.__hash__())}"),
-                                    hx_swap_oob=(f"afterend: #{id} > :nth-child({index})" if index else f"beforeend: #{id}"))))))
-        destructors_per_tab[tid].append(
-            t.on_update(lambda index, old, new: send_event(tid, Template(trcbfunc(new, id=f"e{abs(new.__hash__())}", 
-                                                                     hx_swap_oob=f"outerHTML: #{id} > :nth-child({index+1})")))))
+                                    hx_swap_oob=(f"afterend: #{id} > :nth-child({index})" if index else f"afterbegin: #{id}"))))))
+        def sort_on_update(old_index, new_index, _, new):
+            if old_index == new_index:
+                send_event(tid, Template(Tbody(trcbfunc(new, id=f"e{abs(new.__hash__())}"), 
+                                              hx_swap_oob=f"outerHTML: #{id} > :nth-child({old_index+1})")))
+            else:
+                send_event(tid, Template(hx_swap_oob=f"delete: #{id} > :nth-child({old_index+1})"))
+                send_event(tid, Template(Tbody(trcbfunc(new, id=f"e{abs(new.__hash__())}"),
+                                    hx_swap_oob=(f"afterend: #{id} > :nth-child({new_index})" if new_index else f"afterbegin: #{id}"))))
+        destructors_per_tab[tid].append(t.on_update(sort_on_update))
         destructors_per_tab[tid].append(
             t.on_delete(lambda index, row: send_event(tid, Template(hx_swap_oob=f"delete: #{id} > :nth-child({index+1})"))))
         destructors_per_tab[tid].append(
@@ -397,7 +412,13 @@ def rsql_html_app(live=True, debug=True, db=None, hdrs=static_hdrs, default_hdrs
             return
         tab_refcounts[tid] += 1
         sends[tid] = send
-        print(f"ws connected with tab id {tid}, refcount {tab_refcounts[tid]}")
+        print(f"ws connected with tab id {tid}, refcount {tab_refcounts[tid]}, sending {queues[tid].qsize()} events")
+        # foreach in queues, send
+        while not queues[tid].empty():
+            event = queues[tid].get()
+            if DEBUG_SEND:
+                print("sending event", event, "on ws connect")
+            await send(event)
 
     async def on_disconn(ws, send):
         tid = (ws.url.path.split('/')[-1])
