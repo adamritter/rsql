@@ -1272,10 +1272,8 @@ class Table(View):
 
         # Construct the SQL command to create the table
         column_definitions = []
-        self.is_bool = []
         for col, dtype in columns.items():
             column_definitions.append( (col, dtype.upper() if isinstance(dtype, str) else python_to_sqlite_type[dtype]))
-            self.is_bool.append(dtype == bool)
 
         if table_exists:
             sql = table_exists[0]
@@ -1291,7 +1289,7 @@ class Table(View):
                         dtype = AUTOINCREMENT
                 existing_columns.append((farow[1], dtype))
 
-            if not column_definitions:
+            if not column_definitions or column_definitions == [('id', 'INTEGER PRIMARY KEY AUTOINCREMENT')]:
                 column_definitions = existing_columns
             else:
                 column_definitions_dict = {name.upper(): dtype for name, dtype in column_definitions}
@@ -1309,6 +1307,9 @@ class Table(View):
         self.column_definitions = column_definitions
         self.columns = [col for col, _ in column_definitions]
         self.query = f"SELECT {', '.join(self.columns)} FROM {self.name}"
+        self.is_bool = []
+        for col, dtype in self.column_definitions:
+            self.is_bool.append(dtype == bool)
 
     def __repr__(self):
         return f"Table({self.name}, {self.column_definitions})"
@@ -2034,15 +2035,17 @@ class Database:
             list: The result of the query execution.
         """
         with self.lock:
-            if DEBUG_SQL:
-                print("db.execute", query)
+            t = time.time()
             cursor = self.get_cursor()
             try:
                 if values:
                     cursor.execute(query, values)
                 else:
                     cursor.execute(query)
-                return cursor.fetchall()
+                r = cursor.fetchall()
+                if DEBUG_SQL:
+                    print(f"db.execute {query} ({((time.time() - t) * 1000):.1f}ms)")
+                return r
             except Exception as e:
                 self.conn.rollback()
                 raise Exception(f"Error executing query: {query}" + (f" with values: {values}" if values else "")) from e
