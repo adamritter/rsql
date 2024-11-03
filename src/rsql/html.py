@@ -38,14 +38,14 @@ import asyncio
 def send_event(target_tab_id, event):
     if DEBUG_SEND:
         print(f"send_event target {target_tab_id} from tab {tab_id.get()} event {event}")
-    if target_tab_id == tab_id.get():
-        queues[target_tab_id].put(event)
-        if DEBUG_SEND:
-            print(f"putting event to queue {target_tab_id}, now size: {queues[target_tab_id].qsize()}")
-    elif target_tab_id in sends:
+    if target_tab_id in sends:
         if DEBUG_SEND:
             print(f"sending to ws {target_tab_id}")
-        asyncio.run(sends[target_tab_id](event))
+        # if event loop is running, run the send in the event loop
+        if asyncio.get_running_loop():
+            asyncio.create_task(sends[target_tab_id](event))
+        else:
+            asyncio.run(sends[target_tab_id](event))
     else:
         queues[target_tab_id].put(event)
         if DEBUG_SEND:
@@ -54,7 +54,7 @@ def send_event(target_tab_id, event):
 def rt_with_sqlx(rt, app):
     def rtx(route):
         def decorator(func):
-            return rt(route)(with_sqlx(func, app))
+            return rt(route)(with_sqlx_async(func, app))
         return decorator
     return rtx
 
@@ -63,9 +63,10 @@ global_app = None
 
 from functools import wraps
 from inspect import signature
-def with_sqlx(f, app=None):
+
+def with_sqlx_async(f, app=None):
     @wraps(f)
-    def wrapper(*args):
+    async def wrapper(*args):
         global last_tab_id
         start_time = time.time()
         redirect = args[-1]
@@ -86,7 +87,10 @@ def with_sqlx(f, app=None):
         # print("args", args, "hx_request", hx_request, "sqlx_tab_id", sqlx_tab_id, "tab_id", tab_id.get(), "app", app, "accept_port", accept_port)
         global global_app
         global_app = app
-        result = f(*args)
+        if asyncio.iscoroutinefunction(f):
+            result = await f(*args)
+        else:
+            result = f(*args)
         if isinstance(result, rsql.Value):
             result = value(result)
         if isinstance(result, tuple):
@@ -120,6 +124,7 @@ def with_sqlx(f, app=None):
             else:
                 q.append(RedirectResponse(redirect, status_code=303))
             print("redirect q", q)
+        tab_id.set(None)
         if result:
             return (*q, result)
         else:
@@ -133,6 +138,9 @@ def with_sqlx(f, app=None):
     wrapper.__signature__ = original_sig.replace(parameters=new_params)
     
     return wrapper
+
+def with_sqlx(f, app=None):
+    return with_sqlx_async(f, app)
 
 lastid = 0
 def nextid():

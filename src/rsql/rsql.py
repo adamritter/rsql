@@ -533,6 +533,12 @@ class View:
         """
         return Where(self, main, **where)
     
+    def get(self, id=None, **values):
+        if id:
+            return self.where(id=id, **values).only()
+        else:
+            return self.where(**values).only()
+    
     def union(self, parent2):
         """
         Create a UNION query with the current view and another view.
