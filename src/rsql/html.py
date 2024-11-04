@@ -38,6 +38,11 @@ import asyncio
 def send_event(target_tab_id, event):
     if DEBUG_SEND:
         print(f"send_event target {target_tab_id} from tab {tab_id.get()} event {event}")
+    if target_tab_id == tab_id.get():
+        queues[target_tab_id].put(event)
+        if DEBUG_SEND:
+            print(f"putting event to queue to current tab {target_tab_id}, now size: {queues[target_tab_id].qsize()}")
+
     if target_tab_id in sends:
         if DEBUG_SEND:
             print(f"sending to ws {target_tab_id}")
@@ -63,6 +68,7 @@ global_app = None
 
 from functools import wraps
 from inspect import signature
+import html
 
 def with_sqlx_async(f, app=None):
     @wraps(f)
@@ -103,9 +109,9 @@ def with_sqlx_async(f, app=None):
             result = tuple(t)
         if hx_request:
             q = list(queues[tab_id.get()].queue)
-            queues[tab_id.get()] = Queue()
         else:
-            q = []
+            q = [Script("htmx.swap('body', '"+html.escape(''.join(list(queues[tab_id.get()].queue)))+"' , {swapStyle: 'none'})")]
+        queues[tab_id.get()] = Queue()
         
         end_time = time.time()
         render_time = (end_time - start_time) * 1000  # Convert to milliseconds
