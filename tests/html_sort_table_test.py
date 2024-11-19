@@ -48,6 +48,8 @@ import sys, signal, os
 
 @rtx('/check')
 def post(inner_html:str, state:int):
+    if DEBUG_HTML:
+        print(f"state={state}, inner_html={inner_html}")
     parser = TestHTMLParser()
     parser.feed(inner_html)
     s1 = sorted(parser.rows)    

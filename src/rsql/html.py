@@ -42,8 +42,7 @@ def send_event(target_tab_id, event):
         queues[target_tab_id].put(event)
         if DEBUG_SEND:
             print(f"putting event to queue to current tab {target_tab_id}, now size: {queues[target_tab_id].qsize()}")
-
-    if target_tab_id in sends:
+    elif target_tab_id in sends:
         if DEBUG_SEND:
             print(f"sending to ws {target_tab_id}")
         # if event loop is running, run the send in the event loop
@@ -354,7 +353,7 @@ def table(t, cb=None, header=None, id=None, tab_id0=None, infinite=False, next_b
                                     hx_swap_oob=(f"afterend: #{id} > :nth-child({index})" if index else f"afterbegin: #{id}"))))))
         def sort_on_update(old_index, new_index, _, new):
             if old_index == new_index:
-                send_event(tid, Template(Tbody(trcbfunc(new, id=f"e{abs(new.__hash__())}"), 
+                send_event(tid, Template(trcbfunc(new, id=f"e{abs(new.__hash__())}", 
                                               hx_swap_oob=f"outerHTML: #{id} > :nth-child({old_index+1})")))
             else:
                 send_event(tid, Template(hx_swap_oob=f"delete: #{id} > :nth-child({old_index+1})"))
