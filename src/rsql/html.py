@@ -322,7 +322,7 @@ def table(t, cb=None, header=None, id=None, tab_id0=None, infinite=False, next_b
     if delete:
         header = header + (Th("Delete"),)
 
-    def trcbfunc(row, id=None):
+    def trcbfunc(row, id=None, hx_swap_oob=None):
         if cb:
             r = cb(row)
         else:
@@ -330,12 +330,16 @@ def table(t, cb=None, header=None, id=None, tab_id0=None, infinite=False, next_b
         if delete and isinstance(r, tuple):
             r = r + (Td(Button("Delete", onclick=row.delete_urlm)),)
         if isinstance(r, fasttag.HTML) and r.tag == "tr":
-            return fasttag.HTML(f"<tr{id and f' id=\"{id}\"' or ''}{str(r)[3:]}")
+            return fasttag.HTML(f"<tr{id and f' id=\"{id}\"' or ''}{hx_swap_oob and f' hx-swap-oob=\"{hx_swap_oob}\"' or ''}{str(r)[3:]}")
         elif isinstance(r, fasttag.HTML):
             pass
         else:
             r = tuple([x if isinstance(x, fasttag.HTML) and x.tag == "td" else Td(x) for x in r])  
-        return Tr(r, id=id, onclick=onclick(row) if onclick else None)
+        if hx_swap_oob:
+            return Tr(r, id=id, hx_swap_oob=hx_swap_oob, onclick=onclick(row) if onclick else None)
+        else:
+            return Tr(r, id=id, onclick=onclick(row) if onclick else None)
+        
     r = fasttag.Table(
         *([Thead(header)] if header else []),
         Tbody(*[trcbfunc(row, id=f"e{abs(row.__hash__())}") for row in t], id=id))

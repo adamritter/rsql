@@ -1111,8 +1111,9 @@ class Where(View):
         old_exists = self.is_where_true(old)
         new_exists = self.is_where_true(new)
         if old_exists and new_exists:
-            for cb in self.update_cbs:
-                cb(old, new)
+            if old != new:
+                for cb in self.update_cbs:
+                    cb(old, new)
         elif old_exists:
             for cb in self.delete_cbs:
                 cb(old)
@@ -1315,7 +1316,7 @@ class Table(View):
         self.query = f"SELECT {', '.join(self.columns)} FROM {self.name}"
         self.is_bool = []
         for col, dtype in self.column_definitions:
-            self.is_bool.append(dtype == bool)
+            self.is_bool.append(dtype == bool or dtype == "BOOLEAN")
 
     def __repr__(self):
         return f"Table({self.name}, {self.column_definitions})"
@@ -1333,6 +1334,14 @@ class Table(View):
 
     def update(self, where: dict, **values):
         # print(f"Table: Updating {self.name} with {where} and {values}")
+        if DEBUG_SQL:
+            print(f"Table: Updating {self.name} with {where} and {values}, column definitions: {self.column_definitions}")
+        for key, value in where.items():
+            if type(value) == str:
+                keypos = self.columns.index(key)
+                t = self.column_definitions[keypos][1]
+                if istartswith(t, "INTEGER"):
+                    where[key] = int(value)
         self.db.update(self.name, self.back_from_bool(where), **self.back_from_bool(values))
     
     def call_update_cbs(self, table, old, new):
@@ -1482,6 +1491,18 @@ class ColumnValue(Value):
         self.parent.insert_cbs.remove(self.winsert)
         self.parent.delete_cbs.remove(self.wdelete)
         self.parent.reset_cbs.remove(self.wreset)
+
+class TupleValue(Value):
+    def __init__(self, parents):
+        self.parents = parents
+        super().__init__(tuple(map(lambda p: p.value, parents)))
+        for p in parents:
+            p.onchange(self.call_cbs)
+
+    def call_cbs(self, v):
+        self.value = tuple(map(lambda p: p.value, self.parents))
+        for cb in self.cbs:
+            cb(self.value)
 
 class RowValue(Value):
     def __init__(self, parent):
@@ -2291,7 +2312,7 @@ class Sort(View):
     def find_insert_index(self, row):
         return next((i for i, r in enumerate(self.sorted_results) if self.compare_rows(row, r) < 0), len(self.sorted_results))
 
-    def compare_rows(self, row1, row2):
+    def compare_rows_old(self, row1, row2):
         # It's better to use the sql database engine for this
         for col in self.order_by:
             col_name = col.split()[0]
@@ -2307,6 +2328,13 @@ class Sort(View):
                 elif sql_cmp(row1[col_index], row2[col_index]) > 0:
                     return 1
         return 0
+    
+    def compare_rows(self, row1, row2):
+        placeholders = ', '.join([f"? as '{col}'" for col in self.parent.columns])
+        query = f"select dense_rank() over (order by {', '.join(self.order_by)}) as rank, __id__  from (SELECT 1 as __id__, {placeholders} union all SELECT 2 as __id__, {placeholders}) ORDER BY __id__"
+        result = self.db.execute(query, tuple(row1) + tuple(row2))
+        r = result[0][0] - result[1][0]
+        return r
 
     def update(self, where, **values):
         self.parent.update(where, **values)
